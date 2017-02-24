@@ -1,0 +1,18 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+
+#PyCharm
+*.idea
+
+#notebooks
+*.ipynb
+
+#Data Storage
+*.yml
+*.csv*
+*.pkl
+
+#temp stuff
+*.swp
