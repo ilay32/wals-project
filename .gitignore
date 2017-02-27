@@ -6,8 +6,8 @@ __pycache__/
 #PyCharm
 *.idea
 
-#notebooks
-*.ipynb
+#jupyter stuff
+.ipynb_checkpoints
 
 #Data Storage
 *.yml
@@ -16,3 +16,6 @@ __pycache__/
 
 #temp stuff
 *.swp
+
+#exclusions
+!features.yml
