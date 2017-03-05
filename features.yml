@@ -5,5 +5,10 @@ number_of_cases:
 
 word_order1:
   wals_id: 81A
-  extractor: mult2bin(7) 
-  default: -1
+  extractor: mult2bin(7,-1)
+  default: 0 
+
+issvo:
+  wals_id: 81A
+  extractor: mult2bin(2,1)
+  default: 0

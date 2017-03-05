@@ -18,13 +18,13 @@ def natural(c):
     """
     return numerize(c)
 
-def mult2bin(n):
+def mult2bin(target_value,value):
     """
     binarize a multi-valued feature, returning -1 if the value is n, 
     and 1 otherwise, returns the function that does that
     """
     def which(c):
-        return -1 if numerize(c) == n else 1
+        return value if numerize(c) == target_value else -1*value
     return which
 
 
