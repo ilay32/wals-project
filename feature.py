@@ -7,13 +7,18 @@ class Feature:
         self.specs = data
         self.name = name
         self.extractor = eval(data['extractor'])
+        self.default = self.specs.get('default') or 0        
     
     def extract(self,cell):
-        return self.extractor(cell) if cell else self.specs['default']
+        return self.extractor(cell) if cell != "" else self.default
 
-    def get_languages(self):
+    def get_languages(self,langids=None):
         langv = list()
-        for cell in languages[self.find_column()].values:
+        if langids is None:
+            langs = languages
+        else:
+            langs = languages.filter(items=langids,axis=0)
+        for cell in langs[self.find_column()].values:
             langv.append(self.extract(cell))
         return numpy.array(langv)
 

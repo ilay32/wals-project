@@ -1,14 +1,89 @@
 number_of_cases:
+  desc: taking the wals number of the feature, which foughly corresponds to the actual number of cases. e.g 7 means 8 or 9 cases
   wals_id: 49A
+  wals_name: Number of Cases
   extractor: natural
   default: 0
 
 word_order1:
+  desc: binarising the wals feature to 1 if there is some order, -1 if not (that the wals 7 for this feature)
   wals_id: 81A
+  wals_name: :Order of Subject, Object and Verb
   extractor: mult2bin(7,-1)
   default: 0 
 
 issvo:
+  desc: binarising 81A on the SVO value (2), meaning it returns 1 if the language is SVO, -1 otherwise
   wals_id: 81A
   extractor: mult2bin(2,1)
   default: 0
+
+issov:
+  desc: binarising 81A on the SOV value (1)
+  wals_id: 81A
+  extractor: mult2bin(1,1)
+  default: 0
+
+isvso:
+  desc: binarising 81A on VSO (3)
+  wals_id: 81A
+  extractor: mult2bin(3,1)
+  default: 0
+
+isvos:
+  desc: binarising 81A on VOS (4)
+  wals_id: 81A
+  extractor: mult2bin(4,1)
+  default: 0
+
+isovs:
+  desc: binarising 81A on OVS (5)
+  wals_id: 81A
+  extractor: mult2bin(4,1)
+  default: 0
+
+isosv:
+  desc: binarising 81A on OSV (6)
+  wals_id: 81A
+  extractor: mult2bin(6,1)
+  default: 0
+
+word_order2:
+  desc: binarizing 82A on existance of value (3)
+  wals_id: 82A
+  wals_name: Order of Subject and Verb
+  extractor: mult2bin(3,-1)
+
+issv:
+  desc: binarising 82A  on the SV value (1)
+  wals_id: 82A
+  extractor: mult2bin(1,1)
+  default: 0
+
+isvs:
+  desc: binarising 82A  on the VS value (2)
+  wals_id: 83A
+  wals_name: Order of Object and Verb
+  extractor: mult2bin(2,1)
+
+word_order3:
+  wals_id: 87A
+  wals_name: Order of Adjective and Noun
+  desc: binarizing 87A on existance of value (3)
+  extractor: mult2bin(3,-1)
+
+noun_adj:
+  wals_id: 87A
+  desc: binarizing 87A on NAdj (2)
+  extractor: mult2bin(2,1)
+
+adj_noun:
+  wals_id: 87A
+  desc: binarizing 87A on AdjN (1)
+  extractor: mult2bin(1,1)
+
+adj_noun_adj:
+  wals_id: 87A
+  desc: binarizing 87A on the case where both orders are found (3)
+  extractor: mult2bin(3,1)
+
