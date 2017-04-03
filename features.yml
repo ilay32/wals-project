@@ -6,7 +6,7 @@ number_of_cases:
   default: 0
 
 word_order1:
-  desc: binarising the wals feature to 1 if there is some order, -1 if not (that the wals 7 for this feature)
+  desc: binarising 81A on existance of value (7)
   wals_id: 81A
   wals_name: :Order of Subject, Object and Verb
   extractor: mult2bin(7,-1)
@@ -62,7 +62,7 @@ issv:
 
 isvs:
   desc: binarising 82A  on the VS value (2)
-  wals_id: 83A
+  wals_id: 82A
   wals_name: Order of Object and Verb
   extractor: mult2bin(2,1)
 

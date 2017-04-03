@@ -21,6 +21,9 @@ class Feature:
         for cell in langs[self.find_column()].values:
             langv.append(self.extract(cell))
         return numpy.array(langv)
+    
+    def get_non_empty(self):
+        return [i for i in languages.index if languages.iloc[i][self.find_column()] != ""]
 
     def find_column(self):
         for col in languages:
