@@ -1,0 +1,108 @@
+,"144A Position of Negative Word With Respect to Subject, Object, and Verb",143A Order of Negative Morpheme and Verb,51A Position of Case Affixes,33A Coding of Nominal Plurality,"81A Order of Subject, Object and Verb"
+8,20 MorphNeg,11 Type 3 / Type 4,9 No case affixes or adpositional clitics,2 Plural suffix,1 SOV
+34,19 OptDoubleNeg,15 OptDoubleNeg,9 No case affixes or adpositional clitics,6 Mixed morphological plural,2 SVO
+54,7 SONegV,1 NegV,9 No case affixes or adpositional clitics,2 Plural suffix,1 SOV
+70,7 SONegV,1 NegV,6 Postpositional clitics,8 Plural clitic,1 SOV
+89,19 OptDoubleNeg,15 OptDoubleNeg,9 No case affixes or adpositional clitics,6 Mixed morphological plural,1 SOV
+128,16 More than one position,1 NegV,6 Postpositional clitics,2 Plural suffix,2 SVO
+140,16 More than one position,7 Type 1 / Type 3,1 Case suffixes,2 Plural suffix,7 No dominant order
+143,19 OptDoubleNeg,15 OptDoubleNeg,9 No case affixes or adpositional clitics,2 Plural suffix,2 SVO
+153,8 SOVNeg,2 VNeg,9 No case affixes or adpositional clitics,2 Plural suffix,1 SOV
+183,18 ObligDoubleNeg,14 ObligDoubleNeg,6 Postpositional clitics,2 Plural suffix,1 SOV
+201,4 SVONeg,2 VNeg,9 No case affixes or adpositional clitics,8 Plural clitic,2 SVO
+355,18 ObligDoubleNeg,14 ObligDoubleNeg,1 Case suffixes,7 Plural word,1 SOV
+372,7 SONegV,1 NegV,6 Postpositional clitics,8 Plural clitic,1 SOV
+388,20 MorphNeg,3 [Neg-V],1 Case suffixes,2 Plural suffix,1 SOV
+431,9 NegVSO,1 NegV,,7 Plural word,3 VSO
+440,21 Other,1 NegV,1 Case suffixes,2 Plural suffix,7 No dominant order
+462,8 SOVNeg,2 VNeg,9 No case affixes or adpositional clitics,9 No plural,1 SOV
+650,2 SNegVO,1 NegV,9 No case affixes or adpositional clitics,2 Plural suffix,2 SVO
+653,20 MorphNeg,4 [V-Neg],6 Postpositional clitics,8 Plural clitic,1 SOV
+662,18 ObligDoubleNeg,14 ObligDoubleNeg,1 Case suffixes,2 Plural suffix,1 SOV
+675,16 More than one position,1 NegV,9 No case affixes or adpositional clitics,,7 No dominant order
+676,2 SNegVO,1 NegV,1 Case suffixes,2 Plural suffix,2 SVO
+689,19 OptDoubleNeg,15 OptDoubleNeg,7 Prepositional clitics,2 Plural suffix,2 SVO
+731,7 SONegV,1 NegV,1 Case suffixes,2 Plural suffix,1 SOV
+732,16 More than one position,6 Type 1 / Type 2,1 Case suffixes,2 Plural suffix,7 No dominant order
+774,21 Other,1 NegV,8 Inpositional clitics,8 Plural clitic,7 No dominant order
+778,6 SNegOV,1 NegV,9 No case affixes or adpositional clitics,2 Plural suffix,2 SVO
+783,16 More than one position,1 NegV,1 Case suffixes,2 Plural suffix,7 No dominant order
+791,20 MorphNeg,4 [V-Neg],1 Case suffixes,2 Plural suffix,1 SOV
+798,18 ObligDoubleNeg,14 ObligDoubleNeg,9 No case affixes or adpositional clitics,7 Plural word,2 SVO
+829,19 OptDoubleNeg,15 OptDoubleNeg,9 No case affixes or adpositional clitics,2 Plural suffix,2 SVO
+836,2 SNegVO,1 NegV,7 Prepositional clitics,2 Plural suffix,2 SVO
+845,7 SONegV,1 NegV,1 Case suffixes,2 Plural suffix,1 SOV
+846,20 MorphNeg,4 [V-Neg],9 No case affixes or adpositional clitics,7 Plural word,5 OVS
+857,2 SNegVO,1 NegV,9 No case affixes or adpositional clitics,,2 SVO
+881,2 SNegVO,1 NegV,1 Case suffixes,2 Plural suffix,7 No dominant order
+888,20 MorphNeg,4 [V-Neg],1 Case suffixes,2 Plural suffix,1 SOV
+916,21 Other,1 NegV,6 Postpositional clitics,9 No plural,
+918,2 SNegVO,1 NegV,9 No case affixes or adpositional clitics,5 Plural complete reduplication,2 SVO
+964,9 NegVSO,1 NegV,9 No case affixes or adpositional clitics,7 Plural word,3 VSO
+986,20 MorphNeg,4 [V-Neg],6 Postpositional clitics,2 Plural suffix,1 SOV
+992,2 SNegVO,1 NegV,9 No case affixes or adpositional clitics,8 Plural clitic,2 SVO
+1019,,4 [V-Neg],1 Case suffixes,9 No plural,7 No dominant order
+1045,7 SONegV,1 NegV,1 Case suffixes,2 Plural suffix,1 SOV
+1047,20 MorphNeg,3 [Neg-V],6 Postpositional clitics,2 Plural suffix,1 SOV
+1049,2 SNegVO,1 NegV,9 No case affixes or adpositional clitics,2 Plural suffix,2 SVO
+1060,20 MorphNeg,4 [V-Neg],1 Case suffixes,6 Mixed morphological plural,1 SOV
+1068,8 SOVNeg,2 VNeg,9 No case affixes or adpositional clitics,2 Plural suffix,1 SOV
+1081,18 ObligDoubleNeg,14 ObligDoubleNeg,1 Case suffixes,2 Plural suffix,1 SOV
+1120,21 Other,1 NegV,9 No case affixes or adpositional clitics,6 Mixed morphological plural,7 No dominant order
+1142,20 MorphNeg,4 [V-Neg],1 Case suffixes,2 Plural suffix,1 SOV
+1151,20 MorphNeg,4 [V-Neg],6 Postpositional clitics,2 Plural suffix,1 SOV
+1155,20 MorphNeg,4 [V-Neg],6 Postpositional clitics,8 Plural clitic,1 SOV
+1156,20 MorphNeg,4 [V-Neg],9 No case affixes or adpositional clitics,2 Plural suffix,1 SOV
+1167,7 SONegV,1 NegV,1 Case suffixes,2 Plural suffix,1 SOV
+1194,18 ObligDoubleNeg,14 ObligDoubleNeg,2 Case prefixes,1 Plural prefix,3 VSO
+1239,16 More than one position,1 NegV,9 No case affixes or adpositional clitics,1 Plural prefix,7 No dominant order
+1282,2 SNegVO,1 NegV,9 No case affixes or adpositional clitics,2 Plural suffix,2 SVO
+1285,20 MorphNeg,3 [Neg-V],1 Case suffixes,2 Plural suffix,2 SVO
+1287,16 More than one position,10 Type 2 / Type 4,1 Case suffixes,2 Plural suffix,1 SOV
+1305,20 MorphNeg,4 [V-Neg],1 Case suffixes,2 Plural suffix,1 SOV
+1325,8 SOVNeg,2 VNeg,9 No case affixes or adpositional clitics,7 Plural word,1 SOV
+1368,18 ObligDoubleNeg,14 ObligDoubleNeg,,1 Plural prefix,2 SVO
+1383,12 NegVOS,1 NegV,7 Prepositional clitics,9 No plural,4 VOS
+1386,1 NegSVO,1 NegV,9 No case affixes or adpositional clitics,7 Plural word,3 VSO
+1387,20 MorphNeg,4 [V-Neg],1 Case suffixes,7 Plural word,2 SVO
+1388,18 ObligDoubleNeg,14 ObligDoubleNeg,6 Postpositional clitics,3 Plural stem change,1 SOV
+1390,2 SNegVO,1 NegV,9 No case affixes or adpositional clitics,7 Plural word,2 SVO
+1394,4 SVONeg,2 VNeg,2 Case prefixes,9 No plural,2 SVO
+1439,20 MorphNeg,4 [V-Neg],6 Postpositional clitics,,
+1523,2 SNegVO,1 NegV,9 No case affixes or adpositional clitics,2 Plural suffix,2 SVO
+1579,2 SNegVO,1 NegV,1 Case suffixes,2 Plural suffix,2 SVO
+1629,9 NegVSO,1 NegV,9 No case affixes or adpositional clitics,7 Plural word,3 VSO
+1645,13 ONegVS,1 NegV,5 Mixed morphological case,2 Plural suffix,5 OVS
+1709,21 Other,1 NegV,1 Case suffixes,2 Plural suffix,
+1740,19 OptDoubleNeg,15 OptDoubleNeg,1 Case suffixes,2 Plural suffix,1 SOV
+1842,21 Other,15 OptDoubleNeg,1 Case suffixes,6 Mixed morphological plural,7 No dominant order
+1853,18 ObligDoubleNeg,14 ObligDoubleNeg,1 Case suffixes,9 No plural,1 SOV
+1876,16 More than one position,1 NegV,9 No case affixes or adpositional clitics,,7 No dominant order
+1942,20 MorphNeg,4 [V-Neg],1 Case suffixes,9 No plural,1 SOV
+1946,20 MorphNeg,3 [Neg-V],9 No case affixes or adpositional clitics,2 Plural suffix,1 SOV
+1981,16 More than one position,1 NegV,1 Case suffixes,2 Plural suffix,1 SOV
+1989,16 More than one position,8 Type 1 / Type 4,9 No case affixes or adpositional clitics,8 Plural clitic,1 SOV
+1991,19 OptDoubleNeg,15 OptDoubleNeg,9 No case affixes or adpositional clitics,7 Plural word,3 VSO
+2038,2 SNegVO,1 NegV,1 Case suffixes,2 Plural suffix,2 SVO
+2050,4 SVONeg,2 VNeg,9 No case affixes or adpositional clitics,1 Plural prefix,2 SVO
+2120,8 SOVNeg,2 VNeg,9 No case affixes or adpositional clitics,2 Plural suffix,1 SOV
+2141,8 SOVNeg,2 VNeg,6 Postpositional clitics,7 Plural word,1 SOV
+2155,2 SNegVO,1 NegV,9 No case affixes or adpositional clitics,2 Plural suffix,2 SVO
+2193,19 OptDoubleNeg,15 OptDoubleNeg,9 No case affixes or adpositional clitics,2 Plural suffix,1 SOV
+2201,20 MorphNeg,3 [Neg-V],5 Mixed morphological case,1 Plural prefix,2 SVO
+2212,9 NegVSO,1 NegV,,7 Plural word,3 VSO
+2268,2 SNegVO,1 NegV,9 No case affixes or adpositional clitics,,2 SVO
+2292,2 SNegVO,1 NegV,9 No case affixes or adpositional clitics,2 Plural suffix,2 SVO
+2368,16 More than one position,2 VNeg,1 Case suffixes,7 Plural word,7 No dominant order
+2400,12 NegVOS,1 NegV,9 No case affixes or adpositional clitics,9 No plural,4 VOS
+2405,20 MorphNeg,4 [V-Neg],1 Case suffixes,2 Plural suffix,1 SOV
+2472,2 SNegVO,1 NegV,9 No case affixes or adpositional clitics,7 Plural word,2 SVO
+2487,12 NegVOS,1 NegV,9 No case affixes or adpositional clitics,7 Plural word,4 VOS
+2494,16 More than one position,8 Type 1 / Type 4,9 No case affixes or adpositional clitics,2 Plural suffix,2 SVO
+2505,16 More than one position,1 NegV,1 Case suffixes,9 No plural,7 No dominant order
+2532,20 MorphNeg,4 [V-Neg],,2 Plural suffix,
+2568,21 Other,1 NegV,1 Case suffixes,2 Plural suffix,7 No dominant order
+2576,6 SNegOV,1 NegV,1 Case suffixes,2 Plural suffix,1 SOV
+2607,20 MorphNeg,3 [Neg-V],1 Case suffixes,2 Plural suffix,1 SOV
+2625,2 SNegVO,1 NegV,9 No case affixes or adpositional clitics,7 Plural word,2 SVO
+2675,20 MorphNeg,15 OptDoubleNeg,2 Case prefixes,1 Plural prefix,2 SVO

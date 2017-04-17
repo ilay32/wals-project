@@ -1,0 +1,108 @@
+,82A Order of Subject and Verb,83A Order of Object and Verb,143F Postverbal Negative Morphemes,143E Preverbal Negative Morphemes,143A Order of Negative Morpheme and Verb,143G Minor morphological means of signaling negation
+8,1 SV,1 OV,2 [V-Neg],2 [Neg-V],11 Type 3 / Type 4,4 None
+34,1 SV,2 VO,2 [V-Neg],3 NegV&[Neg-V],15 OptDoubleNeg,4 None
+54,1 SV,1 OV,4 None,1 NegV,1 NegV,4 None
+70,1 SV,1 OV,4 None,1 NegV,1 NegV,4 None
+89,1 SV,1 OV,2 [V-Neg],1 NegV,15 OptDoubleNeg,4 None
+128,1 SV,3 No dominant order,4 None,1 NegV,1 NegV,4 None
+140,1 SV,3 No dominant order,4 None,3 NegV&[Neg-V],7 Type 1 / Type 3,4 None
+143,1 SV,2 VO,1 VNeg,1 NegV,15 OptDoubleNeg,4 None
+153,1 SV,1 OV,1 VNeg,4 None,2 VNeg,4 None
+183,1 SV,1 OV,3 VNeg&[V-Neg],1 NegV,14 ObligDoubleNeg,4 None
+201,1 SV,2 VO,1 VNeg,4 None,2 VNeg,4 None
+355,1 SV,1 OV,1 VNeg,2 [Neg-V],14 ObligDoubleNeg,4 None
+372,1 SV,1 OV,4 None,1 NegV,1 NegV,4 None
+388,1 SV,1 OV,4 None,2 [Neg-V],3 [Neg-V],4 None
+431,2 VS,2 VO,4 None,1 NegV,1 NegV,4 None
+440,1 SV,1 OV,4 None,1 NegV,1 NegV,4 None
+462,1 SV,1 OV,1 VNeg,4 None,2 VNeg,4 None
+650,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+653,1 SV,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+662,1 SV,1 OV,2 [V-Neg],1 NegV,14 ObligDoubleNeg,4 None
+675,2 VS,2 VO,4 None,1 NegV,1 NegV,4 None
+676,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+689,1 SV,2 VO,1 VNeg,1 NegV,15 OptDoubleNeg,4 None
+731,1 SV,1 OV,4 None,1 NegV,1 NegV,4 None
+732,1 SV,3 No dominant order,1 VNeg,1 NegV,6 Type 1 / Type 2,4 None
+774,1 SV,1 OV,4 None,1 NegV,1 NegV,4 None
+778,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+783,3 No dominant order,2 VO,4 None,1 NegV,1 NegV,4 None
+791,1 SV,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+798,1 SV,2 VO,1 VNeg,1 NegV,14 ObligDoubleNeg,4 None
+829,1 SV,2 VO,1 VNeg,1 NegV,15 OptDoubleNeg,4 None
+836,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+845,1 SV,1 OV,4 None,1 NegV,1 NegV,4 None
+846,2 VS,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+857,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+881,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+888,1 SV,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+916,1 SV,1 OV,4 None,1 NegV,1 NegV,4 None
+918,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+964,2 VS,2 VO,4 None,1 NegV,1 NegV,4 None
+986,1 SV,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+992,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+1019,1 SV,3 No dominant order,2 [V-Neg],4 None,4 [V-Neg],4 None
+1045,1 SV,1 OV,4 None,1 NegV,1 NegV,4 None
+1047,1 SV,1 OV,4 None,2 [Neg-V],3 [Neg-V],4 None
+1049,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+1060,1 SV,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+1068,1 SV,1 OV,1 VNeg,4 None,2 VNeg,4 None
+1081,1 SV,1 OV,2 [V-Neg],1 NegV,14 ObligDoubleNeg,4 None
+1120,2 VS,2 VO,4 None,1 NegV,1 NegV,4 None
+1142,1 SV,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+1151,1 SV,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+1155,1 SV,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+1156,1 SV,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+1167,1 SV,1 OV,4 None,1 NegV,1 NegV,4 None
+1194,2 VS,2 VO,1 VNeg,1 NegV,14 ObligDoubleNeg,4 None
+1239,2 VS,2 VO,4 None,1 NegV,1 NegV,4 None
+1282,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+1285,3 No dominant order,2 VO,4 None,2 [Neg-V],3 [Neg-V],4 None
+1287,1 SV,1 OV,3 VNeg&[V-Neg],4 None,10 Type 2 / Type 4,4 None
+1305,1 SV,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+1325,1 SV,1 OV,1 VNeg,4 None,2 VNeg,4 None
+1368,1 SV,2 VO,1 VNeg,3 NegV&[Neg-V],14 ObligDoubleNeg,4 None
+1383,2 VS,2 VO,4 None,1 NegV,1 NegV,4 None
+1386,2 VS,2 VO,4 None,1 NegV,1 NegV,4 None
+1387,2 VS,2 VO,2 [V-Neg],4 None,4 [V-Neg],4 None
+1388,1 SV,1 OV,2 [V-Neg],2 [Neg-V],14 ObligDoubleNeg,4 None
+1390,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+1394,1 SV,2 VO,1 VNeg,4 None,2 VNeg,4 None
+1439,1 SV,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+1523,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+1579,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+1629,2 VS,2 VO,4 None,1 NegV,1 NegV,4 None
+1645,1 SV,1 OV,4 None,1 NegV,1 NegV,4 None
+1709,1 SV,1 OV,4 None,1 NegV,1 NegV,4 None
+1740,1 SV,1 OV,3 VNeg&[V-Neg],4 None,15 OptDoubleNeg,4 None
+1842,2 VS,2 VO,4 None,3 NegV&[Neg-V],15 OptDoubleNeg,4 None
+1853,1 SV,1 OV,4 None,2 [Neg-V],14 ObligDoubleNeg,1 NegTone
+1876,2 VS,2 VO,4 None,1 NegV,1 NegV,4 None
+1942,1 SV,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+1946,1 SV,1 OV,4 None,2 [Neg-V],3 [Neg-V],4 None
+1981,1 SV,1 OV,4 None,1 NegV,1 NegV,4 None
+1989,1 SV,1 OV,2 [V-Neg],1 NegV,8 Type 1 / Type 4,4 None
+1991,2 VS,2 VO,4 None,1 NegV,15 OptDoubleNeg,4 None
+2038,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+2050,1 SV,2 VO,1 VNeg,4 None,2 VNeg,4 None
+2120,1 SV,1 OV,1 VNeg,4 None,2 VNeg,4 None
+2141,1 SV,1 OV,1 VNeg,4 None,2 VNeg,4 None
+2155,3 No dominant order,2 VO,4 None,1 NegV,1 NegV,4 None
+2193,1 SV,1 OV,1 VNeg,1 NegV,15 OptDoubleNeg,4 None
+2201,1 SV,2 VO,4 None,2 [Neg-V],3 [Neg-V],4 None
+2212,2 VS,2 VO,4 None,1 NegV,1 NegV,4 None
+2268,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+2292,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+2368,1 SV,3 No dominant order,1 VNeg,4 None,2 VNeg,4 None
+2400,2 VS,2 VO,4 None,1 NegV,1 NegV,4 None
+2405,1 SV,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+2472,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+2487,2 VS,2 VO,4 None,1 NegV,1 NegV,4 None
+2494,1 SV,2 VO,2 [V-Neg],1 NegV,8 Type 1 / Type 4,4 None
+2505,3 No dominant order,1 OV,4 None,1 NegV,1 NegV,4 None
+2532,1 SV,1 OV,2 [V-Neg],4 None,4 [V-Neg],4 None
+2568,2 VS,2 VO,4 None,1 NegV,1 NegV,4 None
+2576,1 SV,1 OV,4 None,1 NegV,1 NegV,4 None
+2607,1 SV,1 OV,4 None,2 [Neg-V],3 [Neg-V],4 None
+2625,1 SV,2 VO,4 None,1 NegV,1 NegV,4 None
+2675,1 SV,2 VO,2 [V-Neg],2 [Neg-V],15 OptDoubleNeg,4 None
