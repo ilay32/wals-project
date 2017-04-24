@@ -2,12 +2,10 @@ import pandas as pd
 import numpy as np
 import copy
 def locate_columns(df,minrows,numcols,cache):
-    print("entering",numcols)
     ret = list()
     if numcols == 1:
         cols = df.columns[df.sum(axis=0) >= minrows]
         ret = [[c] for c in cols]
-        print("appending",numcols)
         cache.append(ret)
     elif len(cache) >= numcols:
         ret =  cache[numcols - 1]
@@ -29,9 +27,7 @@ def locate_columns(df,minrows,numcols,cache):
                         if satisfies(df,newgroup,minrows):
                             ret.append(newgroup)
         if len(ret) > 0:
-            print("appending" , numcols)
             cache.insert(numcols,ret)
-    print("exiting",numcols)
     return ret
 
 def subs(l):
@@ -53,5 +49,9 @@ def locate_all_columns(df,minrows):
         
 
 if __name__ == '__main__':
-    test = np.random.binomial(1,0.1,size=(20000,20))
-    test = pd.DataFrame(test)
+    wals = pd.read_csv('language.csv',na_filter=False)
+    wals = wals.ix[:,10:]
+    wals  = wals.replace(to_replace=".+",regex=True,value=1)
+    wals = wals.replace(to_replace='',value=0)
+    #test = np.random.binomial(1,0.1,size=(20000,20))
+    #test = pd.DataFrame(test)
