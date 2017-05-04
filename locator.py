@@ -1,6 +1,13 @@
 import pandas as pd
 import numpy as np
-import copy,fbpca,yaml,hashlib,pickle,nltk,sys
+import copy,fbpca,yaml,hashlib,pickle,nltk,sys,nltk,optparse
+
+parser = optparse.OptionParser()
+
+parser.add_option("-r","--restrict",dest="restrict",help="restrict results to homogenous/heterogenous")
+parser.add_option("-c","--cutoff",type="float",nargs=1,dest="cutoff", metavar="CUTOFF",help="save and display items whose quality index is greater than CUTOFF")
+parser.add_option("-l","--limit",dest="limit",type="int",nargs=1,metavar="LIMIT",help="limit the number of results (randomly) to LIMIT, for all group sizes")
+
 fields = yaml.load(open('wals-fields.yml'))
 feature2field = dict()
 for field,codes in fields.items():
@@ -11,7 +18,7 @@ wals = pd.read_csv('language.csv',na_filter=False)
 binarized = wals.ix[:,10:].replace(to_replace=".+",regex=True,value=1)
 binarized = binarized.replace(to_replace="",value=0)
 
-def locate_columns(minrows,numcols,cache):
+def locate_columns(minrows,numcols,cache,restrict=None,limit=None):
     print("entering",minrows,numcols)
     ret = list()
     if numcols == 1:
@@ -22,8 +29,16 @@ def locate_columns(minrows,numcols,cache):
         ret =  cache[numcols - 1]
     else:
         ret = list()
-        prev = locate_columns(minrows,numcols - 1,cache)
+        i = None
+        prev = locate_columns(minrows,numcols - 1,cache,restrict,limit)
+        if limit is not None and len(prev) > 0:
+            inds = np.random.choice(np.arange(len(prev)),min(len(prev),limit))
+            i = 0
         for colgroup in prev:
+            if isinstance(i,int):
+                if i in inds:
+                    continue 
+                i += 1
             for add in binarized.columns:
                 if add in colgroup:
                     continue
@@ -35,6 +50,16 @@ def locate_columns(minrows,numcols,cache):
                 if cand:
                     newgroup = sorted(colgroup + [add])
                     if newgroup not in ret:
+                        if restrict is not None:
+                            fields = fields_dict(newgroup)
+                            if restrict == "heterogenous":
+                                if fields.freq(fields.max()) > 0.8:
+                                    continue
+                            elif restrict == "homogenous":
+                                if fields.B() > 1:
+                                    continue
+                            else:
+                                print("bad restriction:",restrict)
                         if satisfies(newgroup,minrows):
                             ret.append(newgroup)
         if len(ret) > 0:
@@ -53,10 +78,10 @@ def satisfies(colgroup,minrows):
     fullrows = len(sums[sums == len(colgroup)]) 
     return fullrows >= minrows
 
-def locate_all_columns(minrows):
+def locate_all_columns(minrows,restrict=None,limit=None):
     ret = list()
     for i in reversed(range(1,len(binarized.columns))):
-        if len(locate_columns(minrows,i,ret)) == 0:
+        if len(locate_columns(minrows,i,ret,restrict,limit)) == 0:
             break
         else:
             print("finished locating all",minrows,i)
@@ -87,10 +112,24 @@ def asess(df):
         #indicator = numcols * y[0] / trace
         y = np.square(y)
         total_inertia = np.sum(y)
-        indicator = numvars*(y[0] + y[1])/total_inertia
+        indicator = numvars*y[0]/total_inertia
         return indicator,y[0]/total_inertia,y[1]/total_inertia
     except Exception as e:
         print(str(e))        
+        return None
+
+def fields_dict(features):
+    fs = dict()
+    for f in features:
+        code = f.split(" ")[0]
+        field = feature2field[code]
+        if field in fs:
+            fs[field].append(code)
+        else:
+            fs[field] = [code]
+    for f,l in fs.items():
+        fs[f] = len(l)
+    return nltk.FreqDist(fs)
 
 class ColGroup:
     def __init__(self,cols,quality_index,dim1,dim2):
@@ -108,72 +147,46 @@ quality index: {2:.2f}
 dim1: {3:.0%}
 dim2: {4:.0%}
 fields: {5:s}
-columns:
+features:
 {6:s}""".format(
             self.numcols, 
             self.numrows, 
             self.quality_index, 
             self.dim1,
             self.dim2,
-            self.fields_repr(),
+            self.fields.pformat().replace("FreqDist({","").strip("})"),
             "\n\r".join(self.cols)
         )
     
     def sort_fields(self):
-        fs = dict()
-        for col in self.cols:
-            code = col.split(" ")[0]
-            field = feature2field[code]
-            if field in fs:
-                fs[field].append(code)
-            else:
-                fs[field] = [code]
-        for f,l in fs.items():
-            fs[f] = (l,len(l))
-        self.fields = fs
-            
-    def fields_repr(self):
-        ret = ""
-        for f,(li,le) in self.fields.items():
-            ret += f+":"+str(le)+" "
-        return ret.strip()
-
-    def field_proportions(self):
-        ret = list()
-        for f,(li,le) in self.fields.items():
-            ret.append(le/self.numcols)
-        return sorted(ret)
-            
-            
-
-
+        self.fields = fields_dict(self.cols)
+ 
 if __name__ == '__main__':
-    #dat = chunk_wals(['86A Order of Genitive and Noun',
-    #'87A Order of Adjective and Noun',
-    #'90A Order of Relative Clause and Noun'
-    #])
+    opts,args = parser.parse_args()
     flagged = list()
     asessed = set()
     qs = dict()
-    n = int(sys.argv[1])
-    allcols = locate_all_columns(n)
+    n = int(args[0])
+    qcutoff = float(opts.cutoff or 2)
+    allcols = locate_all_columns(n,opts.restrict,opts.limit)
     for i in range(2,len(allcols)):
         icols = allcols[i]
         for cols in icols:
             groupkey = hashlib.md5("".join(sorted(cols)).encode('ascii')).digest()
             if groupkey not in asessed:
                 asessment = asess(chunk_wals(cols))
-                qind = asessment[0]
-                k = str(i+1)+'-long'
-                if k  in qs:
-                    qs[k].append(qind)
-                else:
-                    qs[k] = [qind]
-                if  qind > 1.5:
-                    colgroup = ColGroup(cols,*asessment)
-                    flagged.append(colgroup)
-                    print("flagging:",colgroup)
-                    print()
+                if asessment is not None:
+                    qind = asessment[0]
+                    k = str(i+1)+'-long'
+                    if k  in qs:
+                        qs[k].append(qind)
+                    else:
+                        qs[k] = [qind]
+                    if  qind > qcutoff:
+                        colgroup = ColGroup(cols,*asessment)
+                        flagged.append(colgroup)
+                        print("flagging:",colgroup)
+                        print()
                 asessed.add(groupkey)
     with open('flagged-colgroups-'+str(n)+'.pkl','wb') as f:
         pickle.dump(flagged,f)
