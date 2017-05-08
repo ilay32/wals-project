@@ -52,14 +52,15 @@ def locate_columns(minrows,numcols,cache,restrict=None,limit=None):
                     if newgroup not in ret:
                         if restrict is not None:
                             fields = fields_dict(newgroup)
-                            if restrict == "heterogenous":
+                            if restrict == "heterogenous" and numcols > 4:
                                 if fields.freq(fields.max()) > 0.8:
                                     continue
                             elif restrict == "homogenous":
                                 if fields.B() > 1:
                                     continue
-                            else:
+                            elif numcols > 4:
                                 print("bad restriction:",restrict)
+                            del(fields)
                         if satisfies(newgroup,minrows):
                             ret.append(newgroup)
         if len(ret) > 0:
