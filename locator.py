@@ -1,12 +1,13 @@
 import pandas as pd
 import numpy as np
 import copy,fbpca,yaml,hashlib,pickle,nltk,sys,nltk,optparse
+from progress import progress
 
 parser = optparse.OptionParser()
 
 parser.add_option("-r","--restrict",dest="restrict",help="restrict results to homogenous/heterogenous")
 parser.add_option("-c","--cutoff",type="float",nargs=1,dest="cutoff", metavar="CUTOFF",help="save and display items whose quality index is greater than CUTOFF")
-parser.add_option("-l","--limit",dest="limit",type="int",nargs=1,metavar="LIMIT",help="limit the number of results (randomly) to LIMIT, for all group sizes")
+parser.add_option("-l","--limit",dest="limit",type="float",nargs=1,metavar="LIMIT",help="proportion of possible candidates to prune at each iteration. for example if set to 1.0, then k feature groups of length n will spawn 192*k groups of length n + 1")
 
 fields = yaml.load(open('wals-fields.yml'))
 feature2field = dict()
@@ -17,6 +18,7 @@ for field,codes in fields.items():
 wals = pd.read_csv('language.csv',na_filter=False)
 binarized = wals.ix[:,10:].replace(to_replace=".+",regex=True,value=1)
 binarized = binarized.replace(to_replace="",value=0)
+totalfeatures = len(binarized.columns)
 
 def locate_columns(minrows,numcols,cache,restrict=None,limit=None):
     print("entering",minrows,numcols)
@@ -29,24 +31,47 @@ def locate_columns(minrows,numcols,cache,restrict=None,limit=None):
         ret =  cache[numcols - 1]
     else:
         ret = list()
-        i = None
+        rnds = None
         prev = locate_columns(minrows,numcols - 1,cache,restrict,limit)
-        if limit is not None and len(prev) > 0:
-            inds = np.random.choice(np.arange(len(prev)),min(len(prev),limit))
-            i = 0
+        #if limit is not None and len(prev) > limit:
+        #    inds = np.random.choice(np.arange(len(prev)),limit)
+        #    i = 0
+        willcheck = len(prev) * totalfeatures * (numcols - 1)
+        if limit is not None and numcols > 2:
+            rnds = np.random.random_sample(willcheck)
+        skipped = 0
+        cur = 0
+        if willcheck > 0:
+            print("checking {0:.1f}K feature groups of length {1:d}".format(willcheck/1000,numcols))
         for colgroup in prev:
-            if isinstance(i,int):
-                if i in inds:
-                    continue 
-                i += 1
+            #if isinstance(i,int):
+            #    if i in inds:
+            #        continue 
+            #    i += 1
             for add in binarized.columns:
                 if add in colgroup:
+                    cur += numcols - 1
                     continue
                 cand = True
+                inthisg = 0
                 for s in subs(colgroup):
+                    inthisg += 1
+                    progress(cur,willcheck,50,"skipped: "+str(skipped))
+                    # if the random restriction is on
+                    # toss a coin here to decide whether to skip this or not
+                    if rnds is not None and rnds[cur] > limit/numcols:
+                        skipped += 1
+                        cur += 1
+                        cand = False
+                        continue
                     if sorted(s + [add]) not in prev:
+                        cur += numcols  - inthisg
                         cand = False
                         break
+                    else:
+                        cur += 1
+
+                
                 if cand:
                     newgroup = sorted(colgroup + [add])
                     if newgroup not in ret:
@@ -54,9 +79,11 @@ def locate_columns(minrows,numcols,cache,restrict=None,limit=None):
                             fields = fields_dict(newgroup)
                             if restrict == "heterogenous" and numcols > 4:
                                 if fields.freq(fields.max()) > 0.8:
+                                    skipped += 1
                                     continue
                             elif restrict == "homogenous":
                                 if fields.B() > 1:
+                                    skipped += 1
                                     continue
                             elif numcols > 4:
                                 print("bad restriction:",restrict)
@@ -64,8 +91,9 @@ def locate_columns(minrows,numcols,cache,restrict=None,limit=None):
                         if satisfies(newgroup,minrows):
                             ret.append(newgroup)
         if len(ret) > 0:
+            print()
             cache.insert(numcols,ret)
-    print("exiting",minrows,numcols)
+    #print("exiting",minrows,numcols)
     return ret
 
 def subs(l):
@@ -86,7 +114,8 @@ def locate_all_columns(minrows,restrict=None,limit=None):
             break
         else:
             print("finished locating all",minrows,i)
-    return ret
+    print()
+    returnret
         
 def chunk_wals(columns,chunk=True,just_actives=True):
     bchunk = binarized[columns]
@@ -109,11 +138,9 @@ def asess(df):
     stand = np.diag(1/np.sqrt(rsums)).dot(P - expected).dot(np.diag(1/np.sqrt(csums)))
     try:
         x,y,z = fbpca.pca(stand,numcats,raw=True)
-        #trace = np.sum(np.var(rawdata,axis=0))
-        #indicator = numcols * y[0] / trace
         y = np.square(y)
-        total_inertia = np.sum(y)
-        indicator = numvars*y[0]/total_inertia
+        total_inertia = numcats/numvars - 1
+        indicator = numcats*y[0]/total_inertia
         return indicator,y[0]/total_inertia,y[1]/total_inertia
     except Exception as e:
         print(str(e))        
