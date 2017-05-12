@@ -5,9 +5,43 @@ from progress import progress
 
 parser = optparse.OptionParser()
 
-parser.add_option("-r","--restrict",dest="restrict",help="restrict results to homogenous/heterogenous")
-parser.add_option("-c","--cutoff",type="float",nargs=1,dest="cutoff", metavar="CUTOFF",help="save and display items whose quality index is greater than CUTOFF")
-parser.add_option("-l","--limit",dest="limit",type="float",nargs=1,metavar="LIMIT",help="proportion of possible candidates to prune at each iteration. for example if set to 1.0, then k feature groups of length n will spawn 192*k groups of length n + 1")
+parser.add_option(
+    "--heterogenous",
+    type="float",
+    nargs=1,
+    metavar="MAX",
+    dest="heterogenous",
+    help="restrict feature fields to not more than MAX percent of the features in the group"
+)
+
+parser.add_option(
+    "--homogenous",
+    type="str",
+    nargs=1,
+    metavar="WALS_FIELD",
+    dest="homogenous",
+    help="select features only from the specified field (original WALS names, lower case, underscores instead of spaces"
+)
+
+parser.add_option(
+    "-c",
+    "--cutoff",
+    type="float",
+    nargs=1,
+    dest="cutoff",
+    metavar="CUTOFF",
+    help="save and display items whose quality index is greater than CUTOFF"
+)
+
+parser.add_option(
+    "-l",
+    "--limit",
+    dest="limit",
+    type="float",
+    nargs=1,
+    metavar="LIMIT",
+    help="proportion of possible candidates to prune at each iteration. for example if set to 1.0, then k feature groups of length n will spawn 192*k groups of length n + 1"
+)
 
 fields = yaml.load(open('wals-fields.yml'))
 feature2field = dict()
@@ -20,7 +54,7 @@ binarized = wals.ix[:,10:].replace(to_replace=".+",regex=True,value=1)
 binarized = binarized.replace(to_replace="",value=0)
 totalfeatures = len(binarized.columns)
 
-def locate_columns(minrows,numcols,cache,restrict=None,limit=None):
+def locate_columns(minrows,numcols,cache,heterogenous=None,limit=None):
     print("entering",minrows,numcols)
     ret = list()
     if numcols == 1:
@@ -32,11 +66,9 @@ def locate_columns(minrows,numcols,cache,restrict=None,limit=None):
     else:
         ret = list()
         rnds = None
-        prev = locate_columns(minrows,numcols - 1,cache,restrict,limit)
-        #if limit is not None and len(prev) > limit:
-        #    inds = np.random.choice(np.arange(len(prev)),limit)
-        #    i = 0
+        prev = locate_columns(minrows,numcols - 1,cache,heterogenous,limit)
         willcheck = len(prev) * totalfeatures * (numcols - 1)
+        # for efficient coin tossing down the road
         if limit is not None and numcols > 2:
             rnds = np.random.random_sample(willcheck)
         skipped = 0
@@ -44,19 +76,14 @@ def locate_columns(minrows,numcols,cache,restrict=None,limit=None):
         if willcheck > 0:
             print("checking {0:.1f}K feature groups of length {1:d}".format(willcheck/1000,numcols))
         for colgroup in prev:
-            #if isinstance(i,int):
-            #    if i in inds:
-            #        continue 
-            #    i += 1
+
             for add in binarized.columns:
                 if add in colgroup:
                     cur += numcols - 1
                     continue
                 cand = True
-                inthisg = 0
+                inthisg = 1
                 for s in subs(colgroup):
-                    inthisg += 1
-                    progress(cur,willcheck,50,"skipped: "+str(skipped))
                     # if the random restriction is on
                     # toss a coin here to decide whether to skip this or not
                     if rnds is not None and rnds[cur] > limit/numcols:
@@ -70,26 +97,22 @@ def locate_columns(minrows,numcols,cache,restrict=None,limit=None):
                         break
                     else:
                         cur += 1
+                    inthisg += 1
 
                 
                 if cand:
                     newgroup = sorted(colgroup + [add])
                     if newgroup not in ret:
-                        if restrict is not None:
+                        if heterogenous is not None and numcols > 4:
                             fields = fields_dict(newgroup)
-                            if restrict == "heterogenous" and numcols > 4:
-                                if fields.freq(fields.max()) > 0.8:
-                                    skipped += 1
-                                    continue
-                            elif restrict == "homogenous":
-                                if fields.B() > 1:
-                                    skipped += 1
-                                    continue
-                            elif numcols > 4:
-                                print("bad restriction:",restrict)
+                            if fields.freq(fields.max()) > heterogenous:
+                                skipped += 1
+                                continue
                             del(fields)
                         if satisfies(newgroup,minrows):
                             ret.append(newgroup)
+            
+            progress(cur,willcheck,50,"skipped:{:.1f}K".format(skipped/1000))
         if len(ret) > 0:
             print()
             cache.insert(numcols,ret)
@@ -107,15 +130,13 @@ def satisfies(colgroup,minrows):
     fullrows = len(sums[sums == len(colgroup)]) 
     return fullrows >= minrows
 
-def locate_all_columns(minrows,restrict=None,limit=None):
+def locate_all_columns(minrows,heterogenous=None,limit=None):
     ret = list()
-    for i in reversed(range(1,len(binarized.columns))):
-        if len(locate_columns(minrows,i,ret,restrict,limit)) == 0:
+    for i in reversed(range(1,len(binarized.columns)+1)):
+        if len(locate_columns(minrows,i,ret,heterogenous,limit)) == 0:
             break
-        else:
-            print("finished locating all",minrows,i)
     print()
-    returnret
+    return ret
         
 def chunk_wals(columns,chunk=True,just_actives=True):
     bchunk = binarized[columns]
@@ -195,8 +216,13 @@ if __name__ == '__main__':
     asessed = set()
     qs = dict()
     n = int(args[0])
+    savefile = "feature-sets/colgroups-{:d}".format(n)
+    if opts.homogenous in fields.keys():
+        binarized = binarized[[c for c in binarized.columns if feature2field[c.split(" ")[0]] == opts.homogenous]]
+        savefile += "-homogenous-{}".format(opts.homogenous)
+        totalfeatures = len(binarized.columns)
     qcutoff = float(opts.cutoff or 2)
-    allcols = locate_all_columns(n,opts.restrict,opts.limit)
+    allcols = locate_all_columns(n,opts.heterogenous,opts.limit)
     for i in range(2,len(allcols)):
         icols = allcols[i]
         for cols in icols:
@@ -206,7 +232,7 @@ if __name__ == '__main__':
                 if asessment is not None:
                     qind = asessment[0]
                     k = str(i+1)+'-long'
-                    if k  in qs:
+                    if k in qs:
                         qs[k].append(qind)
                     else:
                         qs[k] = [qind]
@@ -216,8 +242,15 @@ if __name__ == '__main__':
                         print("flagging:",colgroup)
                         print()
                 asessed.add(groupkey)
-    with open('flagged-colgroups-'+str(n)+'.pkl','wb') as f:
-        pickle.dump(flagged,f)
+    if opts.heterogenous:
+        savefile += "-heterogenous-{:.1f}".format(opts.heterogenous)
+    if opts.limit:
+        savefile += "-random-limit-ratio-{:.1f}".format(opts.limit)
+    if len(flagged) > 0:
+        if not os.path.isdir('feature-sets'):
+            os.mkdir('feature-sets')
+        with open(savefile+'.pkl','wb') as f:
+            pickle.dump(flagged,f)
 
     qindstats = list()
     for l in qs.values():
