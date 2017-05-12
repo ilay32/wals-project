@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-import copy,fbpca,yaml,hashlib,pickle,nltk,sys,nltk,optparse
+import copy,fbpca,yaml,hashlib,pickle,nltk,sys,nltk,optparse,os
 from progress import progress
 
 parser = optparse.OptionParser()
@@ -43,16 +43,24 @@ parser.add_option(
     help="proportion of possible candidates to prune at each iteration. for example if set to 1.0, then k feature groups of length n will spawn 192*k groups of length n + 1"
 )
 
-fields = yaml.load(open('wals-fields.yml'))
-feature2field = dict()
-for field,codes in fields.items():
-    for code in codes:
-        feature2field[code] = field
-
 wals = pd.read_csv('language.csv',na_filter=False)
 binarized = wals.ix[:,10:].replace(to_replace=".+",regex=True,value=1)
 binarized = binarized.replace(to_replace="",value=0)
 totalfeatures = len(binarized.columns)
+hetreject = list()
+fields = yaml.load(open('wals-fields.yml'))
+feature2field = dict()
+code2feature = dict()
+for field,codes in fields.items():
+    for code in codes:
+        feature2field[code] = field
+for featfullname in binarized.columns:
+    code = featfullname.split(" ")[0]
+    code2feature[code] = featfullname
+    binarized = binarized.rename(columns={featfullname : code})
+    wals = wals.rename(columns={featfullname : code})
+
+
 
 def locate_columns(minrows,numcols,cache,heterogenous=None,limit=None):
     print("entering",minrows,numcols)
@@ -76,14 +84,14 @@ def locate_columns(minrows,numcols,cache,heterogenous=None,limit=None):
         if willcheck > 0:
             print("checking {0:.1f}K feature groups of length {1:d}".format(willcheck/1000,numcols))
         for colgroup in prev:
-
             for add in binarized.columns:
                 if add in colgroup:
                     cur += numcols - 1
                     continue
                 cand = True
-                inthisg = 1
+                inthisg = 0
                 for s in subs(colgroup):
+                    inthisg += 1
                     # if the random restriction is on
                     # toss a coin here to decide whether to skip this or not
                     if rnds is not None and rnds[cur] > limit/numcols:
@@ -97,19 +105,11 @@ def locate_columns(minrows,numcols,cache,heterogenous=None,limit=None):
                         break
                     else:
                         cur += 1
-                    inthisg += 1
 
-                
                 if cand:
                     newgroup = sorted(colgroup + [add])
                     if newgroup not in ret:
-                        if heterogenous is not None and numcols > 4:
-                            fields = fields_dict(newgroup)
-                            if fields.freq(fields.max()) > heterogenous:
-                                skipped += 1
-                                continue
-                            del(fields)
-                        if satisfies(newgroup,minrows):
+                        if satisfies(newgroup,minrows,heterogenous):
                             ret.append(newgroup)
             
             progress(cur,willcheck,50,"skipped:{:.1f}K".format(skipped/1000))
@@ -125,10 +125,29 @@ def subs(l):
         cop.remove(item)
         yield cop
         
-def satisfies(colgroup,minrows):
+def satisfies(colgroup,minrows,maxprop):
+    l = len(colgroup)
     sums = np.sum(binarized[colgroup],axis=1)
-    fullrows = len(sums[sums == len(colgroup)]) 
-    return fullrows >= minrows
+    fullrows = len(sums[sums == l]) 
+    # if the heterogeneity requirement is on, and the group is too homogenous,
+    # check if there's a subset of the covered languages that's larger than minrows and does not
+    # include features from the dominant field
+    if maxprop is not None and fullrows > minrows:
+        fields = fields_dict(colgroup)
+        if fields.freq(fields.max()) > maxprop:
+            for feature in binarized.columns:
+                if feature2field[feature] != fields.max() and feature not in colgroup:
+                    sums2 = np.sum(binarized[colgroup + [feature]],axis=1)
+                    fullrows2 = len(sums2[sums2 == l + 1])
+                    if fullrows2 > minrows:
+                        return True
+            # the loop completed so this group can't be extended with non-dominant fields
+            if len(hetreject) > l:
+                hetreject[l] += 1
+            else:
+                hetreject.append(1)
+            return False
+    return fullrows > minrows
 
 def locate_all_columns(minrows,heterogenous=None,limit=None):
     ret = list()
@@ -170,19 +189,19 @@ def asess(df):
 def fields_dict(features):
     fs = dict()
     for f in features:
-        code = f.split(" ")[0]
-        field = feature2field[code]
+        field = feature2field[f]
         if field in fs:
-            fs[field].append(code)
+            fs[field].append(f)
         else:
-            fs[field] = [code]
-    for f,l in fs.items():
-        fs[f] = len(l)
+            fs[field] = [f]
+    for field,l in fs.items():
+        fs[field] = len(l)
     return nltk.FreqDist(fs)
 
 class ColGroup:
     def __init__(self,cols,quality_index,dim1,dim2):
         self.cols = cols
+        self.colnames = [code2feature[c] for c in cols]
         self.quality_index = quality_index
         self.dim1 = dim1
         self.dim2 = dim2
@@ -204,7 +223,7 @@ features:
             self.dim1,
             self.dim2,
             self.fields.pformat().replace("FreqDist({","").strip("})"),
-            "\n\r".join(self.cols)
+            "\n\r".join(self.colnames)
         )
     
     def sort_fields(self):
@@ -218,7 +237,7 @@ if __name__ == '__main__':
     n = int(args[0])
     savefile = "feature-sets/colgroups-{:d}".format(n)
     if opts.homogenous in fields.keys():
-        binarized = binarized[[c for c in binarized.columns if feature2field[c.split(" ")[0]] == opts.homogenous]]
+        binarized = binarized[[c for c in binarized.columns if feature2field[c] == opts.homogenous]]
         savefile += "-homogenous-{}".format(opts.homogenous)
         totalfeatures = len(binarized.columns)
     qcutoff = float(opts.cutoff or 2)
