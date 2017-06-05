@@ -18,3 +18,4 @@ __pycache__/
 
 #exclusions
 !features.yml
+!wals-fields.yml

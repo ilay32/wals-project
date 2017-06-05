@@ -1,9 +1,56 @@
 import pandas as pd
 import numpy as np
-import copy,fbpca,yaml,hashlib,pickle,nltk,sys,nltk,optparse,os
+from sklearn.cluster import KMeans as km
+from sklearn.metrics import silhouette_score as silsc
+import copy,fbpca,yaml,hashlib,pickle,nltk,sys,nltk,optparse,os,prince
 from progress import progress
 
 parser = optparse.OptionParser()
+
+parser.add_option(
+    "-s",
+    "--silhouette-score-cutoff",
+    dest="sil_cutoff",
+    metavar="SIL_CUTOFF",
+    help="print out only results with silhoette score larger than SIL_CUTOFF. any feature group passing CUTOFF will be saved regardless."
+)
+
+parser.add_option(
+    "-m",
+    "--empty",
+    dest="empty",
+    metavar="EMPTY",
+    type="int",
+    help="specify number of empty cells permitted for feature columns"
+)
+    
+parser.add_option(
+    "-w",
+    "--with-clustering",
+    action="store_true",
+    dest="with_clustering",
+    help="when set, the evaluation of a feature group will perform clustering of the two large families and check the resulting silhouette coefficient"
+)
+
+parser.add_option(
+    "-e",
+    "--exclude",
+    action="append",
+    type="string",
+    metavar="EXCLUDE",
+    dest="exclude",
+    help="Exclude the specified field(s) (underscore, lower case...)"
+)
+
+parser.add_option(
+    "-i",
+    "--include",
+    metavar="INCLUDE",
+    action="append",
+    type="string",
+    dest="include",
+    help="Include the specified fields(s) (underscore, lower case...)"
+)
 
 parser.add_option(
     "--heterogenous",
@@ -12,15 +59,6 @@ parser.add_option(
     metavar="MAX",
     dest="heterogenous",
     help="restrict feature fields to not more than MAX percent of the features in the group"
-)
-
-parser.add_option(
-    "--homogenous",
-    type="str",
-    nargs=1,
-    metavar="WALS_FIELD",
-    dest="homogenous",
-    help="select features only from the specified field (original WALS names, lower case, underscores instead of spaces"
 )
 
 parser.add_option(
@@ -82,7 +120,7 @@ def locate_columns(minrows,numcols,cache,heterogenous=None,limit=None):
         skipped = 0
         cur = 0
         if willcheck > 0:
-            print("checking {0:.1f}K feature groups of length {1:d}".format(willcheck/1000,numcols))
+            print("checking {0:.1f}K feature groups of length {1:d}".format(willcheck/1000,numcols -1))
         for colgroup in prev:
             for add in binarized.columns:
                 if add in colgroup:
@@ -126,14 +164,16 @@ def subs(l):
         yield cop
         
 def satisfies(colgroup,minrows,maxprop):
+    allow_empty = options.empty or 0
     l = len(colgroup)
     sums = np.sum(binarized[colgroup],axis=1)
-    fullrows = len(sums[sums == l]) 
+    subtract = allow_empty if l > allow_empty else 0
+    fullrows = len(sums[sums >= (l - subtract)])
     # if the heterogeneity requirement is on, and the group is too homogenous,
     # check if there's a subset of the covered languages that's larger than minrows and does not
     # include features from the dominant field
     if maxprop is not None and fullrows > minrows:
-        fields = fields_dict(colgroup)
+        fields = nltk.FreqDist([feature2field[c] for c in colgroup])
         if fields.freq(fields.max()) > maxprop:
             for feature in binarized.columns:
                 if feature2field[feature] != fields.max() and feature not in colgroup:
@@ -157,14 +197,23 @@ def locate_all_columns(minrows,heterogenous=None,limit=None):
     print()
     return ret
         
-def chunk_wals(columns,chunk=True,just_actives=True):
+def chunk_wals(columns,chunk=True,just_actives=True,allow_empty=0):
+    #if options.allow_empty:
+    #    allow_empty = options.allow_empty
     bchunk = binarized[columns]
-    indices = bchunk.sum(axis=1) == len(columns)
+    full = bchunk.sum(axis=1) == len(columns)
+    indices = full.index
+    if allow_empty > 0:
+        notfull = bchunk[~full]
+        notfull = notfull[notfull.sum(axis=1) > len(columns) - 2]
+        add = notfull.sample(allow_empty)
+        almostfull = bchunk[full].append(add).sort_index()
+        indices = almostfull.index
     if chunk:
         cols = columns if just_actives else np.concatenate((wals.columns[0:10],columns))
-        return wals[indices][cols]
+        return wals.loc[indices][cols]
     else:
-        return np.count_nonzero(indices)
+        return np.count_nonzero(full)
 
 def asess(df):
     numvars = len(df.columns)
@@ -186,19 +235,44 @@ def asess(df):
         print(str(e))        
         return None
 
-def fields_dict(features):
-    fs = dict()
-    for f in features:
-        field = feature2field[f]
-        if field in fs:
-            fs[field].append(f)
-        else:
-            fs[field] = [f]
-    for field,l in fs.items():
-        fs[field] = len(l)
-    return nltk.FreqDist(fs)
+def gen_separation(obj,thresh=None):
+    df = None
+    iscolgroup = False
+    if isinstance(obj,ColGroup):
+        df = chunk_wals(obj.cols,True,False)
+        iscolgroup = True
+    elif isinstance(obj,pd.DataFrame):
+        df = obj
+    else:
+        print("wrong input for gen_separation")
+        return
+    families = nltk.FreqDist(df['family'])
+    top2 = [fam[0] for fam in families.most_common(2)]
+    top2counts = [fam[1] for fam in families.most_common(2)]
+    mdf = df[[c for c in df.columns if c in binarized.columns]]
+    mca = prince.MCA(mdf,n_components=-1)
+    numdims = significant_dimensions(mca,(thresh or 0.6))
+    labels = df['family'][df['family'].isin(top2)]
+    filtered = mca.row_principal_coordinates[np.arange(numdims)].loc[labels.index]
+    clustermodel = km(n_clusters=2,n_init=15).fit(filtered)
+    a,b,c  = silsc(filtered,labels),top2counts[0],top2counts[1]
+    if iscolgroup:
+        obj.silhouette_score = a
+        obj.clust1_size = b
+        obj.clust2_size = c
+        obj.clust_dim = numdims
+        obj.family1 = top2[0]
+        obj.family2 = top2[1]
+    return a,b,c 
+
+def significant_dimensions(mca,thresh):
+    for i,cm in enumerate(mca.cumulative_explained_inertia,1):
+        if cm >= thresh:
+            return i
+
 
 class ColGroup:
+    csv_dir = 'chunked-feature-sets'
     def __init__(self,cols,quality_index,dim1,dim2):
         self.cols = cols
         self.colnames = [code2feature[c] for c in cols]
@@ -207,10 +281,19 @@ class ColGroup:
         self.dim2 = dim2
         self.numcols = len(cols)
         self.numrows = chunk_wals(self.cols,False)
-        self.sort_fields()
+        self.fields = nltk.FreqDist([feature2field[c] for c in self.cols])
+        self.silhouette_score = None
     
+    def fields_spread(self):
+        return self.fields.most_common(1)[0]/self.fields.N()
+    
+    def to_csv(self):
+        df = chunk_wals(self.cols,True,False)
+        filename = "-".join(self.cols + [str(self.numrows)])+'.csv'
+        df.to_csv(os.path.join(ColGroup.csv_dir,filename))
+
     def __str__(self) :
-        return """{0:d} long group covering {1:d} languages
+        ret =  """{0:d} long group covering {1:d} languages
 quality index: {2:.2f}
 dim1: {3:.0%}
 dim2: {4:.0%}
@@ -225,10 +308,26 @@ features:
             self.fields.pformat().replace("FreqDist({","").strip("})"),
             "\n\r".join(self.colnames)
         )
-    
-    def sort_fields(self):
-        self.fields = fields_dict(self.cols)
- 
+        if isinstance(self.silhouette_score,float):
+            ret += """
+family1: {0:d} ({1:s}), 
+family2: {2:d} ({3:s}), 
+separation: {4:.2f}""".format(
+            self.clust1_size,
+            self.family1,
+            self.clust2_size,
+            self.family2,
+            self.silhouette_score
+        )
+        return ret
+
+def verify_fields(l):
+    for f in l:
+        if f not in fields.keys():
+            print("include/exclude: arguments must be WALS feature areas lower-cased, underscore for space")
+            quit()
+    return True
+
 if __name__ == '__main__':
     opts,args = parser.parse_args()
     flagged = list()
@@ -236,11 +335,21 @@ if __name__ == '__main__':
     qs = dict()
     n = int(args[0])
     savefile = "feature-sets/colgroups-{:d}".format(n)
-    if opts.homogenous in fields.keys():
-        binarized = binarized[[c for c in binarized.columns if feature2field[c] == opts.homogenous]]
-        savefile += "-homogenous-{}".format(opts.homogenous)
-        totalfeatures = len(binarized.columns)
+    global options
+    options = opts
+    if opts.include is not None: 
+        inc = opts.include if isinstance(opts.include,list) else [opts.include]
+        if verify_fields(inc): 
+            binarized = binarized[[c for c in binarized.columns if feature2field[c] in inc]]
+            savefile += "-exc-{}".format("-".join(opts.include))
+    if opts.exclude is not None:
+        exc = opts.exclude if isinstance(opts.exclude,list) else [opts.exclude]
+        if verify_fields(exc):
+            binarized = binarized[[c for c in binarized.columns if feature2field[c] not in exc]]
+            savefile += "-inc-{}".format(opts.exclude)
+    totalfeatures = len(binarized.columns)
     qcutoff = float(opts.cutoff or 2)
+    scutoff = float(opts.sil_cutoff or 0)
     allcols = locate_all_columns(n,opts.heterogenous,opts.limit)
     for i in range(2,len(allcols)):
         icols = allcols[i]
@@ -258,8 +367,11 @@ if __name__ == '__main__':
                     if  qind > qcutoff:
                         colgroup = ColGroup(cols,*asessment)
                         flagged.append(colgroup)
-                        print("flagging:",colgroup)
-                        print()
+                        if opts.with_clustering:
+                            sil,clst1,clst2 = gen_separation(colgroup)
+                            if (scutoff and sil >= scutoff) or not scutoff:
+                                print("flagging:",colgroup)
+                                print()
                 asessed.add(groupkey)
     if opts.heterogenous:
         savefile += "-heterogenous-{:.1f}".format(opts.heterogenous)
