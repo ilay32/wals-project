@@ -81,7 +81,7 @@ parser.add_option(
     help="proportion of possible candidates to prune at each iteration. for example if set to 1.0, then k feature groups of length n will spawn 192*k groups of length n + 1"
 )
 
-wals = pd.read_csv('language.csv',na_filter=False)
+wals = pd.read_csv('wals.csv',na_filter=False)
 binarized = wals.ix[:,10:].replace(to_replace=".+",regex=True,value=1)
 binarized = binarized.replace(to_replace="",value=0)
 totalfeatures = len(binarized.columns)
