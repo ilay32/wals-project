@@ -12,13 +12,22 @@ parser.add_option(
     "--silhouette-score-cutoff",
     dest="sil_cutoff",
     metavar="SIL_CUTOFF",
-    help="print out only results with silhoette score larger than SIL_CUTOFF. any feature group passing CUTOFF will be saved regardless."
+    help="flag (and save) only results with silhoette score larger than SIL_CUTOFF in addition to the CUTOFF restriction."
 )
 
 parser.add_option(
-    "-m",
-    "--empty",
-    dest="empty",
+    "-d",
+    "--dry-run",
+    dest="dryrun",
+    metavar="DRYRUN",
+    action="store_true",
+    help="don't save flagged results to disk"
+)
+
+parser.add_option(
+    "-a",
+    "--allow_empty",
+    dest="allow_empty",
     metavar="EMPTY",
     type="int",
     help="specify number of empty cells permitted for feature columns"
@@ -164,7 +173,7 @@ def subs(l):
         yield cop
         
 def satisfies(colgroup,minrows,maxprop):
-    allow_empty = options.empty or 0
+    allow_empty = options.allow_empty or 0
     l = len(colgroup)
     sums = np.sum(binarized[colgroup],axis=1)
     subtract = allow_empty if l > allow_empty else 0
@@ -198,17 +207,17 @@ def locate_all_columns(minrows,heterogenous=None,limit=None):
     return ret
         
 def chunk_wals(columns,chunk=True,just_actives=True,allow_empty=0):
-    #if options.allow_empty:
-    #    allow_empty = options.allow_empty
+    allow_empty = empties_allowed(allow_empty)
     bchunk = binarized[columns]
     full = bchunk.sum(axis=1) == len(columns)
-    indices = full.index
+    indices = bchunk.index[full]
     if allow_empty > 0:
         notfull = bchunk[~full]
         notfull = notfull[notfull.sum(axis=1) > len(columns) - 2]
-        add = notfull.sample(allow_empty)
-        almostfull = bchunk[full].append(add).sort_index()
-        indices = almostfull.index
+        if len(notfull):
+            add = notfull.sample(allow_empty)
+            almostfull = bchunk[full].append(add).sort_index()
+            indices = almostfull.index
     if chunk:
         cols = columns if just_actives else np.concatenate((wals.columns[0:10],columns))
         return wals.loc[indices][cols]
@@ -261,14 +270,20 @@ def gen_separation(obj,thresh=None):
         obj.clust1_size = b
         obj.clust2_size = c
         obj.clust_dim = numdims
-        obj.family1 = top2[0]
-        obj.family2 = top2[1]
+        obj.families = families
     return a,b,c 
 
 def significant_dimensions(mca,thresh):
     for i,cm in enumerate(mca.cumulative_explained_inertia,1):
         if cm >= thresh:
             return i
+
+def empties_allowed(n):
+    ret = n
+    if n == 0:
+        if 'options' in  globals() and options.allow_empty is not None:
+            ret  = options.allow_empty
+    return ret
 
 
 class ColGroup:
@@ -287,10 +302,18 @@ class ColGroup:
     def fields_spread(self):
         return self.fields.most_common(1)[0]/self.fields.N()
     
-    def to_csv(self):
-        df = chunk_wals(self.cols,True,False)
-        filename = "-".join(self.cols + [str(self.numrows)])+'.csv'
-        df.to_csv(os.path.join(ColGroup.csv_dir,filename))
+    def to_csv(self,binary=False,allow_empty=0,filename=None):
+        allow_empty = empties_allowed(allow_empty)
+        print(allow_empty)
+        df = chunk_wals(self.cols,True,False,allow_empty)
+        if filename is None:
+            filename = "-".join(self.cols + [str(self.numrows)])+'.csv'
+        if binary:
+            active = pd.get_dummies(df.ix[:,10:])
+            supp = df.ix[:,:10]
+            df = pd.concat([supp,active],axis=1)
+        df.to_csv(os.path.join(ColGroup.csv_dir,filename),ignore_index=True)
+        return df
 
     def __str__(self) :
         ret =  """{0:d} long group covering {1:d} languages
@@ -309,14 +332,15 @@ features:
             "\n\r".join(self.colnames)
         )
         if isinstance(self.silhouette_score,float):
+            top2 = [ p[0] for p in self.families.most_common(2) ]
             ret += """
 family1: {0:d} ({1:s}), 
 family2: {2:d} ({3:s}), 
 separation: {4:.2f}""".format(
             self.clust1_size,
-            self.family1,
+            top2[0],
             self.clust2_size,
-            self.family2,
+            top2[1],
             self.silhouette_score
         )
         return ret
@@ -330,30 +354,32 @@ def verify_fields(l):
 
 if __name__ == '__main__':
     opts,args = parser.parse_args()
+    global options
+    options = opts
     flagged = list()
     asessed = set()
     qs = dict()
     n = int(args[0])
-    savefile = "feature-sets/colgroups-{:d}".format(n)
-    global options
-    options = opts
+    savefile = os.path.join("feature-sets","colgroups-{:d}".format(n))
     if opts.include is not None: 
         inc = opts.include if isinstance(opts.include,list) else [opts.include]
         if verify_fields(inc): 
             binarized = binarized[[c for c in binarized.columns if feature2field[c] in inc]]
-            savefile += "-exc-{}".format("-".join(opts.include))
+            savefile += "-inc-{}".format("-".join(inc))
     if opts.exclude is not None:
         exc = opts.exclude if isinstance(opts.exclude,list) else [opts.exclude]
         if verify_fields(exc):
             binarized = binarized[[c for c in binarized.columns if feature2field[c] not in exc]]
-            savefile += "-inc-{}".format(opts.exclude)
+            savefile += "-exc-{}".format("-".join(exc))
     totalfeatures = len(binarized.columns)
     qcutoff = float(opts.cutoff or 2)
     scutoff = float(opts.sil_cutoff or 0)
     allcols = locate_all_columns(n,opts.heterogenous,opts.limit)
     for i in range(2,len(allcols)):
+        print("asessing {:d} long groups".format(i+1))
         icols = allcols[i]
-        for cols in icols:
+        for j,cols in enumerate(icols):
+            progress(j,len(icols),50,"flagged:{:d}".format(len(flagged)))
             groupkey = hashlib.md5("".join(sorted(cols)).encode('ascii')).digest()
             if groupkey not in asessed:
                 asessment = asess(chunk_wals(cols))
@@ -366,18 +392,18 @@ if __name__ == '__main__':
                         qs[k] = [qind]
                     if  qind > qcutoff:
                         colgroup = ColGroup(cols,*asessment)
-                        flagged.append(colgroup)
                         if opts.with_clustering:
                             sil,clst1,clst2 = gen_separation(colgroup)
-                            if (scutoff and sil >= scutoff) or not scutoff:
-                                print("flagging:",colgroup)
-                                print()
+                        if (scutoff and sil >= scutoff) or not scutoff or not opts.with_clustering:
+                            flagged.append(colgroup)
                 asessed.add(groupkey)
+        print()
+
     if opts.heterogenous:
         savefile += "-heterogenous-{:.1f}".format(opts.heterogenous)
     if opts.limit:
-        savefile += "-random-limit-ratio-{:.1f}".format(opts.limit)
-    if len(flagged) > 0:
+        savefile += "-randlimit-{:.1f}".format(opts.limit)
+    if len(flagged) > 0 and not opts.dryrun:
         if not os.path.isdir('feature-sets'):
             os.mkdir('feature-sets')
         with open(savefile+'.pkl','wb') as f:
