@@ -344,15 +344,15 @@ features:
             "\n\r".join(self.colnames)
         )
         if isinstance(self.silhouette_score,float):
-            top2 = [ p[0] for p in self.families.most_common(2) ]
+            top2 = self.families.most_common(2)
             ret += """
 family1: {0:d} ({1:s}), 
 family2: {2:d} ({3:s}), 
 separation: {4:.2f}""".format(
-            self.clust1_size,
-            top2[0],
-            self.clust2_size,
-            top2[1],
+            top2[0][1],
+            top2[0][0],
+            top2[1][1],
+            top2[1][0],
             self.silhouette_score
         )
         return ret
