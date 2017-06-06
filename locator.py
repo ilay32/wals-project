@@ -2,8 +2,10 @@ import pandas as pd
 import numpy as np
 from sklearn.cluster import KMeans as km
 from sklearn.metrics import silhouette_score as silsc
+from scipy.spatial.distance import hamming
 import copy,fbpca,yaml,hashlib,pickle,nltk,sys,nltk,optparse,os,prince
 from progress import progress
+from matplotlib import pyplot as plt
 
 parser = optparse.OptionParser()
 
@@ -128,8 +130,9 @@ def locate_columns(minrows,numcols,cache,heterogenous=None,limit=None):
             rnds = np.random.random_sample(willcheck)
         skipped = 0
         cur = 0
+        passed = 0
         if willcheck > 0:
-            print("checking {0:.1f}K feature groups of length {1:d}".format(willcheck/1000,numcols -1))
+            print("checking {0:.1f}K feature groups of length {1:d}".format(willcheck/1000,numcols))
         for colgroup in prev:
             for add in binarized.columns:
                 if add in colgroup:
@@ -157,9 +160,10 @@ def locate_columns(minrows,numcols,cache,heterogenous=None,limit=None):
                     newgroup = sorted(colgroup + [add])
                     if newgroup not in ret:
                         if satisfies(newgroup,minrows,heterogenous):
+                            passed += 1
                             ret.append(newgroup)
             
-            progress(cur,willcheck,50,"skipped:{:.1f}K".format(skipped/1000))
+            progress(cur,willcheck,50,"skipped:{0:.1f}K passed: {1:d}".format(skipped/1000, passed))
         if len(ret) > 0:
             print()
             cache.insert(numcols,ret)
@@ -244,40 +248,6 @@ def asess(df):
         print(str(e))        
         return None
 
-def gen_separation(obj,thresh=None):
-    df = None
-    iscolgroup = False
-    if isinstance(obj,ColGroup):
-        df = chunk_wals(obj.cols,True,False)
-        iscolgroup = True
-    elif isinstance(obj,pd.DataFrame):
-        df = obj
-    else:
-        print("wrong input for gen_separation")
-        return
-    families = nltk.FreqDist(df['family'])
-    top2 = [fam[0] for fam in families.most_common(2)]
-    top2counts = [fam[1] for fam in families.most_common(2)]
-    mdf = df[[c for c in df.columns if c in binarized.columns]]
-    mca = prince.MCA(mdf,n_components=-1)
-    numdims = significant_dimensions(mca,(thresh or 0.6))
-    labels = df['family'][df['family'].isin(top2)]
-    filtered = mca.row_principal_coordinates[np.arange(numdims)].loc[labels.index]
-    clustermodel = km(n_clusters=2,n_init=15).fit(filtered)
-    a,b,c  = silsc(filtered,labels),top2counts[0],top2counts[1]
-    if iscolgroup:
-        obj.silhouette_score = a
-        obj.clust1_size = b
-        obj.clust2_size = c
-        obj.clust_dim = numdims
-        obj.families = families
-    return a,b,c 
-
-def significant_dimensions(mca,thresh):
-    for i,cm in enumerate(mca.cumulative_explained_inertia,1):
-        if cm >= thresh:
-            return i
-
 def empties_allowed(n):
     ret = n
     if n == 0:
@@ -300,11 +270,53 @@ class ColGroup:
         self.silhouette_score = None
     
     def fields_spread(self):
-        return self.fields.most_common(1)[0]/self.fields.N()
+        return self.fields.most_common(1)[0][0]/self.fields.N()
     
+    def gen_separation(self):
+        df =  chunk_wals(self.cols,True,False)
+        families = nltk.FreqDist(df['family'])
+        top2 = [fam[0] for fam in families.most_common(2)]
+        top2counts = [fam[1] for fam in families.most_common(2)]
+        active = df[[c for c in df.columns if c in binarized.columns]]
+        mca = prince.MCA(active,n_components=-1)
+        labels = df['family'][df['family'].isin(top2)]
+        silhouettes = list()
+        binact = pd.get_dummies(active)
+        filtered = binact.loc[labels.index]
+        silhouettes.append((0,silsc(filtered,labels,hamming)))
+        for i in range(1,len(mca.eigenvalues)+1):
+            filtered = mca.row_principal_coordinates[np.arange(i)].loc[labels.index]
+            #clustermodel = km(n_clusters=2,n_init=15).fit(filtered)
+            silhouettes.append((i,silsc(filtered,labels)))
+        self.silhouettes = silhouettes
+        self.silhouette_score = sorted(silhouettes,key=lambda x: x[1],reverse=True)[0][1]
+        self.families = families
+        self.mca = mca
+        return self.silhouette_score
+    
+    def plot_silhouettes(self):
+        thresh = 0.5
+        maxdim = self.silhouettes[-1][0]
+        minscore = sorted(self.silhouettes,key=lambda x: x[1])[0][1]
+        sd = self.significant_dimensions(thresh)
+        plt.ylabel('average silhouette coefficient')
+        plt.xlabel('number of dimensions used for clustering')
+        x = [d for d,s in self.silhouettes]
+        y = [s for d,s in self.silhouettes]
+        plt.scatter(x[0],y[0],color='r',label='without MCA (Hamming distance based)')
+        plt.plot(x[1:],y[1:],label='by MCA projection')
+        plt.xticks(np.arange(0,maxdim))
+        plt.grid()
+        plt.vlines([sd],ymin=minscore,ymax=self.silhouette_score,linestyles="dashed",label="{:.1f} of the variance explained".format(thresh))
+        plt.legend()
+
+    def significant_dimensions(self,thresh=0.6):
+        for i,cm in enumerate(self.mca.cumulative_explained_inertia,1):
+            if cm >= thresh:
+                return i
+
     def to_csv(self,binary=False,allow_empty=0,filename=None):
         allow_empty = empties_allowed(allow_empty)
-        print(allow_empty)
         df = chunk_wals(self.cols,True,False,allow_empty)
         if filename is None:
             filename = "-".join(self.cols + [str(self.numrows)])+'.csv'
@@ -393,8 +405,8 @@ if __name__ == '__main__':
                     if  qind > qcutoff:
                         colgroup = ColGroup(cols,*asessment)
                         if opts.with_clustering:
-                            sil,clst1,clst2 = gen_separation(colgroup)
-                        if (scutoff and sil >= scutoff) or not scutoff or not opts.with_clustering:
+                            sil = colgroup.gen_separation()
+                        if (scutoff and sil >= scutoff) or (not scutoff) or (not opts.with_clustering):
                             flagged.append(colgroup)
                 asessed.add(groupkey)
         print()
