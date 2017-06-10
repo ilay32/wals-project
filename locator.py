@@ -6,6 +6,7 @@ from scipy.spatial.distance import hamming
 import copy,fbpca,yaml,hashlib,pickle,nltk,sys,nltk,optparse,os,prince
 from progress import progress
 from matplotlib import pyplot as plt
+from spectral import kmeans
 
 parser = optparse.OptionParser()
 
@@ -268,6 +269,7 @@ class ColGroup:
         self.numrows = chunk_wals(self.cols,False)
         self.fields = nltk.FreqDist([feature2field[c] for c in self.cols])
         self.silhouette_score = None
+        self.mca = None
     
     def fields_spread(self):
         return self.fields.most_common(1)[0][0]/self.fields.N()
@@ -282,10 +284,10 @@ class ColGroup:
         silhouettes = list()
         binact = pd.get_dummies(active)
         filtered = binact.loc[labels.index]
+        silhouettes.append((-1,silsc(filtered,labels)))
         silhouettes.append((0,silsc(filtered,labels,hamming)))
         for i in range(1,len(mca.eigenvalues)+1):
             filtered = mca.row_principal_coordinates[np.arange(i)].loc[labels.index]
-            #clustermodel = km(n_clusters=2,n_init=15).fit(filtered)
             silhouettes.append((i,silsc(filtered,labels)))
         self.silhouettes = silhouettes
         self.silhouette_score = sorted(silhouettes,key=lambda x: x[1],reverse=True)[0][1]
@@ -302,13 +304,44 @@ class ColGroup:
         plt.xlabel('dimensions used')
         x = [d for d,s in self.silhouettes]
         y = [s for d,s in self.silhouettes]
-        plt.scatter(x[0],y[0],color='r',label='without MCA (Hamming distance based)')
-        plt.plot(x[1:],y[1:],label='by MCA projection')
+        
+        plt.scatter(x[0],y[0],color='g',label='without MCA (Eucledian)')
+        plt.scatter(x[1],y[1],color='r',label='without MCA (Hamming)')
+        
+        plt.plot(x[2:],y[2:],label='by MCA projection')
         plt.xticks(np.arange(0,maxdim))
         plt.grid()
         plt.vlines([sd],ymin=minscore,ymax=self.silhouette_score,linestyles="dashed",label="{:.1f} of the variance explained".format(thresh))
         plt.legend()
-
+    
+    def add_clustering_data(self,n_clusts=2,raw=False):
+        self.gen_separation(n_clusts)
+        df =  chunk_wals(self.cols,True,False)
+        dims = sorted(self.silhouettes,key=lambda x: x[1],reverse=True)[0][0]
+        topfams = [fam[0] for fam in self.families.most_common(n_clusts)]
+        labels = df['family'][df['family'].isin(topfams)]
+        if raw:
+            dims = 'raw'
+            starts = list()
+            active = pd.get_dummies(df[[c for c in df.columns if c in binarized.columns]])
+            for f in topfams:
+                choice = labels[labels == f].sample(1).index
+                starts.append(active.loc[choice].values)
+            filtered = np.array([[pd.get_dummies(active).loc[i].values] for i in labels.index])
+            print(filtered)
+            pred,means = kmeans(filtered,n_clusts,start_clusters=np.array(starts),distance='L1') 
+            pred = pred.flatten()
+            print(pred)
+        else:
+            filtered = self.mca.row_principal_coordinates[np.arange(dims)].loc[labels.index]
+            pred = km(n_clusters=n_clusts,n_init=15).fit_predict(filtered)
+        addcolumn = list()
+        prediter = iter(pred)
+        for i in df.index:
+            addcolumn.append(next(prediter) if i in labels.index else 'other')
+        df["kmpredict-{}-{}".format(n_clusts,dims)] = pd.Series(addcolumn,index=df.index)
+        return df
+        
     def significant_dimensions(self,thresh=0.6):
         for i,cm in enumerate(self.mca.cumulative_explained_inertia,1):
             if cm >= thresh:
