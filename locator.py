@@ -272,14 +272,13 @@ class ColGroup:
     def fields_spread(self):
         return self.fields.most_common(1)[0][0]/self.fields.N()
     
-    def gen_separation(self):
+    def gen_separation(self,n_clusts=2):
         df =  chunk_wals(self.cols,True,False)
         families = nltk.FreqDist(df['family'])
-        top2 = [fam[0] for fam in families.most_common(2)]
-        top2counts = [fam[1] for fam in families.most_common(2)]
+        topfams = [fam[0] for fam in families.most_common(n_clusts)]
         active = df[[c for c in df.columns if c in binarized.columns]]
         mca = prince.MCA(active,n_components=-1)
-        labels = df['family'][df['family'].isin(top2)]
+        labels = df['family'][df['family'].isin(topfams)]
         silhouettes = list()
         binact = pd.get_dummies(active)
         filtered = binact.loc[labels.index]
@@ -300,7 +299,7 @@ class ColGroup:
         minscore = sorted(self.silhouettes,key=lambda x: x[1])[0][1]
         sd = self.significant_dimensions(thresh)
         plt.ylabel('average silhouette coefficient')
-        plt.xlabel('number of dimensions used for clustering')
+        plt.xlabel('dimensions used')
         x = [d for d,s in self.silhouettes]
         y = [s for d,s in self.silhouettes]
         plt.scatter(x[0],y[0],color='r',label='without MCA (Hamming distance based)')
