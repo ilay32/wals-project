@@ -93,126 +93,48 @@ parser.add_option(
     help="proportion of possible candidates to prune at each iteration. for example if set to 1.0, then k feature groups of length n will spawn 192*k groups of length n + 1"
 )
 
+# globals #
+#--------#
 wals = pd.read_csv('wals.csv',na_filter=False)
 binarized = wals.ix[:,10:].replace(to_replace=".+",regex=True,value=1)
 binarized = binarized.replace(to_replace="",value=0)
-totalfeatures = len(binarized.columns)
-hetreject = list()
-fields = yaml.load(open('wals-fields.yml'))
-feature2field = dict()
+
+headclass_indices = islang(wals,heads)
+ratioclass_indices = islang(wals,ratios)
+
+featfullnames = wals.columns[10:]
+feature2area = dict()
 code2feature = dict()
-for field,codes in fields.items():
+areas = yaml.load(open('wals-areas.yml'))
+for area,codes in areas.items():
     for code in codes:
-        feature2field[code] = field
-for featfullname in binarized.columns:
-    code = featfullname.split(" ")[0]
-    code2feature[code] = featfullname
-    binarized = binarized.rename(columns={featfullname : code})
-    wals = wals.rename(columns={featfullname : code})
+        feature2area[code] = area
+for name in featfullnames:
+    code = name.split(" ")[0]
+    code2feature[code] = name
+    wals = wals.rename(columns={name : code})
+    binarized = binarized.rename(columns={name : code})
+
+        
 
 
+# helpers #
+#---------#
+def verify_areas(l):
+    for f in l:
+        if f not in areas.keys():
+            print("include/exclude: arguments must be WALS feature areas lower-cased, underscore for space")
+            quit()
+    return True
 
-def locate_columns(minrows,numcols,cache,heterogenous=None,limit=None):
-    print("entering",minrows,numcols)
-    ret = list()
-    if numcols == 1:
-        cols = binarized.columns[binarized.sum(axis=0) >= minrows]
-        ret = [[c] for c in cols]
-        cache.append(ret)
-    elif len(cache) >= numcols:
-        ret =  cache[numcols - 1]
-    else:
-        ret = list()
-        rnds = None
-        prev = locate_columns(minrows,numcols - 1,cache,heterogenous,limit)
-        willcheck = len(prev) * totalfeatures * (numcols - 1)
-        # for efficient coin tossing down the road
-        if limit is not None and numcols > 2:
-            rnds = np.random.random_sample(willcheck)
-        skipped = 0
-        cur = 0
-        passed = 0
-        if willcheck > 0:
-            print("checking {0:.1f}K feature groups of length {1:d}".format(willcheck/1000,numcols))
-        for colgroup in prev:
-            for add in binarized.columns:
-                if add in colgroup:
-                    cur += numcols - 1
-                    continue
-                cand = True
-                inthisg = 0
-                for s in subs(colgroup):
-                    inthisg += 1
-                    # if the random restriction is on
-                    # toss a coin here to decide whether to skip this or not
-                    if rnds is not None and rnds[cur] > limit/numcols:
-                        skipped += 1
-                        cur += 1
-                        cand = False
-                        continue
-                    if sorted(s + [add]) not in prev:
-                        cur += numcols  - inthisg
-                        cand = False
-                        break
-                    else:
-                        cur += 1
-
-                if cand:
-                    newgroup = sorted(colgroup + [add])
-                    if newgroup not in ret:
-                        if satisfies(newgroup,minrows,heterogenous):
-                            passed += 1
-                            ret.append(newgroup)
-            
-            progress(cur,willcheck,50,"skipped:{0:.1f}K passed: {1:d}".format(skipped/1000, passed))
-        if len(ret) > 0:
-            print()
-            cache.insert(numcols,ret)
-    #print("exiting",minrows,numcols)
-    return ret
 
 def subs(l):
     for item in l:
         cop = copy.deepcopy(l)
         cop.remove(item)
         yield cop
-        
-def satisfies(colgroup,minrows,maxprop):
-    allow_empty = options.allow_empty or 0
-    l = len(colgroup)
-    sums = np.sum(binarized[colgroup],axis=1)
-    subtract = allow_empty if l > allow_empty else 0
-    fullrows = len(sums[sums >= (l - subtract)])
-    # if the heterogeneity requirement is on, and the group is too homogenous,
-    # check if there's a subset of the covered languages that's larger than minrows and does not
-    # include features from the dominant field
-    if maxprop is not None and fullrows > minrows:
-        fields = nltk.FreqDist([feature2field[c] for c in colgroup])
-        if fields.freq(fields.max()) > maxprop:
-            for feature in binarized.columns:
-                if feature2field[feature] != fields.max() and feature not in colgroup:
-                    sums2 = np.sum(binarized[colgroup + [feature]],axis=1)
-                    fullrows2 = len(sums2[sums2 == l + 1])
-                    if fullrows2 > minrows:
-                        return True
-            # the loop completed so this group can't be extended with non-dominant fields
-            if len(hetreject) > l:
-                hetreject[l] += 1
-            else:
-                hetreject.append(1)
-            return False
-    return fullrows > minrows
 
-def locate_all_columns(minrows,heterogenous=None,limit=None):
-    ret = list()
-    for i in reversed(range(1,len(binarized.columns)+1)):
-        if len(locate_columns(minrows,i,ret,heterogenous,limit)) == 0:
-            break
-    print()
-    return ret
-        
 def chunk_wals(columns,chunk=True,just_actives=True,allow_empty=0):
-    allow_empty = empties_allowed(allow_empty)
     bchunk = binarized[columns]
     full = bchunk.sum(axis=1) == len(columns)
     indices = bchunk.index[full]
@@ -249,26 +171,203 @@ def asess(df):
         print(str(e))        
         return None
 
-def empties_allowed(n):
-    ret = n
-    if n == 0:
-        if 'options' in  globals() and options.allow_empty is not None:
-            ret  = options.allow_empty
-    return ret
 
+       
+class Locator:
+    def __init__(self,minrows,cutoff=2,sil_cutoff=0.5,limit=None,heterogenous=None, \
+        include=None,exclude=None,with_clustering=False,allow_empty=0,dryrun=False,target_langs=None):
+        self.minrows = minrows
+        self.dryrun = dryrun
+        self.cutoff = float(cutoff or 2)
+        self.sil_cutoff = sil_cutoff
+        self.with_clustering = with_clustering
+        self.random_limit = limit
+        self.heterogenous = heterogenous
+        self.allow_empty = int(allow_empty or 0)
+        self.hetreject = list()
+        self.include = include
+        self.exclude = exclude
+        self.cache = list()
+        self.limit = limit
+        self.target_langs = target_langs
+        self.totalfeatures = 0
+
+    def satisfies(self,colgroup):
+        l = len(colgroup)
+        minrows = self.minrows
+        sums = np.sum(binarized[colgroup],axis=1)
+        subtract = self.allow_empty if l > self.allow_empty else 0
+        fullrows = sums[sums >= (l - subtract)]
+        if self.target_langs is not None:
+            fullrows = fullrows[fullrows.index.intersection(self.target_langs)]
+        # if the heterogeneity requirement is on, and the group is too homogenous,
+        # check if there's a subset of the covered languages that's larger than minrows and does not
+        # include features from the dominant field
+        if self.heterogenous is not None and len(fullrows) > minrows:
+            fields = nltk.FreqDist([feature2area[c] for c in colgroup])
+            if fields.freq(fields.max()) > self.heterogenous:
+                for feature in binarized.columns:
+                    if feature2area[feature] != fields.max() and feature not in colgroup:
+                        sums2 = np.sum(binarized[colgroup + [feature]],axis=1)
+                        fullrows2 = len(sums2[sums2 == l + 1])
+                        if fullrows2 > minrows:
+                            return True
+                # the loop completed so this group can't be extended with non-dominant fields
+                if len(self.hetreject) > l:
+                    self.hetreject[l] += 1
+                else:
+                    self.hetreject.append(1)
+                return False
+        return len(fullrows) > minrows
+
+
+
+    def locate_columns(self,numcols):
+        minrows = self.minrows
+        print("entering",minrows,numcols)
+        ret = list()
+        if numcols == 1:
+            cols = binarized.columns[binarized.sum(axis=0) >= minrows]
+            ret = [[c] for c in cols]
+            self.cache.append(ret)
+        elif len(self.cache) >= numcols:
+            ret =  self.cache[numcols - 1]
+        else:
+            ret = list()
+            rnds = None
+            prev = self.locate_columns(numcols - 1)
+            willcheck = len(prev) * self.totalfeatures * (numcols - 1)
+            
+            # for efficient coin tossing down the road
+            if self.limit is not None and numcols > 2:
+                rnds = np.random.random_sample(willcheck)
+            skipped = 0
+            cur = 0
+            passed = 0
+            if willcheck > 0:
+                print("checking {0:.1f}K feature groups of length {1:d}".format(willcheck/1000,numcols))
+            for colgroup in prev:
+                for add in binarized.columns:
+                    if add in colgroup:
+                        cur += numcols - 1
+                        continue
+                    cand = True
+                    inthisg = 0
+                    for s in subs(colgroup):
+                        inthisg += 1
+                        # if the random restriction is on
+                        # toss a coin here to decide whether to skip this or not
+                        if rnds is not None and rnds[cur] > float(self.limit)/numcols:
+                            skipped += 1
+                            cur += 1
+                            cand = False
+                            continue
+                        if sorted(s + [add]) not in prev:
+                            cur += numcols  - inthisg
+                            cand = False
+                            break
+                        else:
+                            cur += 1
+
+                    if cand:
+                        newgroup = sorted(colgroup + [add])
+                        if newgroup not in ret:
+                            if self.satisfies(newgroup):
+                                passed += 1
+                                ret.append(newgroup)
+                
+                progress(cur,willcheck,50,"skipped:{0:.1f}K passed: {1:d}".format(skipped/1000, passed))
+            if len(ret) > 0:
+                print()
+                self.cache.insert(numcols,ret)
+        return ret
+
+       
+    def locate_all_columns(self):
+        for i in reversed(range(1,len(binarized.columns)+1)):
+            if len(self.locate_columns(i)) == 0:
+                break
+        print()
+        return self.cache
+            
+    def main(self):
+        global binarized
+        flagged = list()
+        asessed = set()
+        qs = dict()
+        savefile = os.path.join("feature-sets","colgroups-{:d}".format(self.minrows))
+        if self.include is not None: 
+            inc = self.include if isinstance(self.include,list) else [self.include]
+            if verify_areas(inc): 
+                binarized = binarized[[c for c in binarized.columns if feature2area[c] in inc]]
+                savefile += "-inc-{}".format("-".join(inc))
+        if self.exclude is not None:
+            exc = self.exclude if isinstance(self.exclude,list) else [self.exclude]
+            if verify_areas(exc):
+                binarized = binarized[[c for c in binarized.columns if feature2area[c] not in exc]]
+                savefile += "-exc-{}".format("-".join(exc))
+        self.totalfeatures = len(binarized.columns)
+        allcols = self.locate_all_columns()
+        for i in range(2,len(allcols)):
+            print("asessing {:d} long groups".format(i+1))
+            icols = allcols[i]
+            for j,cols in enumerate(icols):
+                progress(j,len(icols),50,"flagged:{:d}".format(len(flagged)))
+                groupkey = "".join(sorted(cols))
+                if groupkey not in asessed:
+                    asessment = asess(chunk_wals(cols))
+                    if asessment is not None:
+                        qind = asessment[0]
+                        k = str(i+1)+'-long'
+                        if k in qs:
+                            qs[k].append(qind)
+                        else:
+                            qs[k] = [qind]
+                        if  qind > self.cutoff:
+                            colgroup = ColGroup(cols,asessment,allow_empty=self.allow_empty)
+                            if self.with_clustering:
+                                sil = colgroup.gen_separation()
+                            if (self.with_clustering and sil >= self.sil_cutoff) or not self.with_clustering:
+                                flagged.append(colgroup)
+                    asessed.add(groupkey)
+            print()
+
+        if self.heterogenous:
+            savefile += "-heterogenous-{:.1f}".format(self.heterogenous)
+        if self.limit:
+            savefile += "-randlimit-{:.1f}".format(self.limit)
+        if len(flagged) > 0 and not self.dryrun:
+            if not os.path.isdir('feature-sets'):
+                os.mkdir('feature-sets')
+            with open(savefile+'.pkl','wb') as f:
+                pickle.dump(flagged,f)
+
+        qindstats = list()
+        for l in qs.values():
+            qindstats.append({
+                'max' : np.max(l),
+                'min' : np.min(l),
+                'mean': np.mean(l),
+                '3rdq': np.percentile(l,0.75),
+                'std' : np.sqrt(np.var(l))
+            })
+        self.qindstats = pd.DataFrame(qindstats,index=qs.keys())
+        self.flagged = flagged
 
 class ColGroup:
     csv_dir = 'chunked-feature-sets'
-    def __init__(self,cols,quality_index,dim1,dim2):
+    def __init__(self,cols,asessment=None,allow_empty=0):
         self.cols = cols
         self.colnames = [code2feature[c] for c in cols]
-        self.quality_index = quality_index
-        self.dim1 = dim1
-        self.dim2 = dim2
+        self.asessment = asessment or asess(chunk_wals(cols))
+        self.quality_index = asessment[0]
+        self.dim1  = asessment[1]
+        self.dim2 = asessment[2]
         self.numcols = len(cols)
         self.numrows = chunk_wals(self.cols,False)
-        self.fields = nltk.FreqDist([feature2field[c] for c in self.cols])
+        self.fields = nltk.FreqDist([feature2area[c] for c in self.cols])
         self.silhouette_score = None
+        self.allow_empty = allow_empty
         self.mca = None
     
     def fields_spread(self):
@@ -348,8 +447,7 @@ class ColGroup:
                 return i
 
     def to_csv(self,binary=False,allow_empty=0,filename=None):
-        allow_empty = empties_allowed(allow_empty)
-        df = chunk_wals(self.cols,True,False,allow_empty)
+        df = chunk_wals(self.cols,True,False,self.allow_empty)
         if filename is None:
             filename = "-".join(self.cols + [str(self.numrows)])+'.csv'
         if binary:
@@ -389,77 +487,9 @@ separation: {4:.2f}""".format(
         )
         return ret
 
-def verify_fields(l):
-    for f in l:
-        if f not in fields.keys():
-            print("include/exclude: arguments must be WALS feature areas lower-cased, underscore for space")
-            quit()
-    return True
-
 if __name__ == '__main__':
     opts,args = parser.parse_args()
-    global options
-    options = opts
-    flagged = list()
-    asessed = set()
-    qs = dict()
-    n = int(args[0])
-    savefile = os.path.join("feature-sets","colgroups-{:d}".format(n))
-    if opts.include is not None: 
-        inc = opts.include if isinstance(opts.include,list) else [opts.include]
-        if verify_fields(inc): 
-            binarized = binarized[[c for c in binarized.columns if feature2field[c] in inc]]
-            savefile += "-inc-{}".format("-".join(inc))
-    if opts.exclude is not None:
-        exc = opts.exclude if isinstance(opts.exclude,list) else [opts.exclude]
-        if verify_fields(exc):
-            binarized = binarized[[c for c in binarized.columns if feature2field[c] not in exc]]
-            savefile += "-exc-{}".format("-".join(exc))
-    totalfeatures = len(binarized.columns)
-    qcutoff = float(opts.cutoff or 2)
-    scutoff = float(opts.sil_cutoff or 0)
-    allcols = locate_all_columns(n,opts.heterogenous,opts.limit)
-    for i in range(2,len(allcols)):
-        print("asessing {:d} long groups".format(i+1))
-        icols = allcols[i]
-        for j,cols in enumerate(icols):
-            progress(j,len(icols),50,"flagged:{:d}".format(len(flagged)))
-            groupkey = hashlib.md5("".join(sorted(cols)).encode('ascii')).digest()
-            if groupkey not in asessed:
-                asessment = asess(chunk_wals(cols))
-                if asessment is not None:
-                    qind = asessment[0]
-                    k = str(i+1)+'-long'
-                    if k in qs:
-                        qs[k].append(qind)
-                    else:
-                        qs[k] = [qind]
-                    if  qind > qcutoff:
-                        colgroup = ColGroup(cols,*asessment)
-                        if opts.with_clustering:
-                            sil = colgroup.gen_separation()
-                        if (scutoff and sil >= scutoff) or (not scutoff) or (not opts.with_clustering):
-                            flagged.append(colgroup)
-                asessed.add(groupkey)
-        print()
-
-    if opts.heterogenous:
-        savefile += "-heterogenous-{:.1f}".format(opts.heterogenous)
-    if opts.limit:
-        savefile += "-randlimit-{:.1f}".format(opts.limit)
-    if len(flagged) > 0 and not opts.dryrun:
-        if not os.path.isdir('feature-sets'):
-            os.mkdir('feature-sets')
-        with open(savefile+'.pkl','wb') as f:
-            pickle.dump(flagged,f)
-
-    qindstats = list()
-    for l in qs.values():
-        qindstats.append({
-            'max' : np.max(l),
-            'min' : np.min(l),
-            'mean': np.mean(l),
-            '3rdq': np.percentile(l,0.75),
-            'std' : np.sqrt(np.var(l))
-        })
-    qindstats = pd.DataFrame(qindstats,index=qs.keys())
+    minrows  = int(args[0])
+    loc = Locator(minrows,**opts.__dict__)
+    loc.main()
+    
