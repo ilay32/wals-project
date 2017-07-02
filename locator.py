@@ -7,7 +7,10 @@ import copy,fbpca,yaml,hashlib,pickle,nltk,sys,nltk,optparse,os,prince
 from progress import progress
 from matplotlib import pyplot as plt
 from spectral import kmeans
+from polinsk import *
 
+# for cli usage #
+#---------------#
 parser = optparse.OptionParser()
 
 parser.add_option(
@@ -120,11 +123,22 @@ for name in featfullnames:
 
 # helpers #
 #---------#
+def rebinarize():
+    b = wals.ix[:,10:].replace(to_replace=".+",regex=True,value=1)
+    b = b.replace(to_replace="",value=0)
+    b = b.rename(columns={name : code})
+    return b
+
 def verify_areas(l):
     for f in l:
         if f not in areas.keys():
-            print("include/exclude: arguments must be WALS feature areas lower-cased, underscore for space")
-            quit()
+            return False
+    return True
+
+def verify_features(l):
+    for f in l:
+        if f not in code2feature.keys():
+            return False
     return True
 
 
@@ -290,8 +304,9 @@ class Locator:
         print()
         return self.cache
             
-    def main(self):
+    def main(self,filename=None):
         global binarized
+        binarized = rebinarize()
         flagged = list()
         asessed = set()
         qs = dict()
@@ -300,7 +315,13 @@ class Locator:
             inc = self.include if isinstance(self.include,list) else [self.include]
             if verify_areas(inc): 
                 binarized = binarized[[c for c in binarized.columns if feature2area[c] in inc]]
-                savefile += "-inc-{}".format("-".join(inc))
+            elif verify_features(inc): 
+                binarized = binarized[inc]
+            else:
+                print("include/exclude must be a WALS area name (lowercase,underscored) or a feature (just the code e.g 1A) or a list of such strings")
+                quit()
+            savefile += "-inc-{}".format("-".join(inc))
+
         if self.exclude is not None:
             exc = self.exclude if isinstance(self.exclude,list) else [self.exclude]
             if verify_areas(exc):
@@ -336,6 +357,8 @@ class Locator:
             savefile += "-heterogenous-{:.1f}".format(self.heterogenous)
         if self.limit:
             savefile += "-randlimit-{:.1f}".format(self.limit)
+        if filename is not None:
+            savefile = os.path.join('feature-sets',filename)
         if len(flagged) > 0 and not self.dryrun:
             if not os.path.isdir('feature-sets'):
                 os.mkdir('feature-sets')
