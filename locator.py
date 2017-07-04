@@ -149,6 +149,7 @@ def subs(l):
         yield cop
 
 def chunk_wals(columns,chunk=True,just_actives=True,allow_empty=0):
+    global binarized
     bchunk = binarized[columns]
     full = bchunk.sum(axis=1) == len(columns)
     indices = bchunk.index[full]
@@ -383,9 +384,9 @@ class ColGroup:
         self.cols = cols
         self.colnames = [code2feature[c] for c in cols]
         self.asessment = asessment or asess(chunk_wals(cols))
-        self.quality_index = asessment[0]
-        self.dim1  = asessment[1]
-        self.dim2 = asessment[2]
+        self.quality_index = self.asessment[0]
+        self.dim1  = self.asessment[1]
+        self.dim2 = self.asessment[2]
         self.numcols = len(cols)
         self.numrows = chunk_wals(self.cols,False)
         self.fields = nltk.FreqDist([feature2area[c] for c in self.cols])
@@ -394,7 +395,7 @@ class ColGroup:
         self.mca = None
     
     def fields_spread(self):
-        return self.fields.most_common(1)[0][0]/self.fields.N()
+        return self.fields.most_common(1)[0][1]/float(self.fields.N())
     
     def gen_separation(self,n_clusts=2):
         df =  chunk_wals(self.cols,True,False)
@@ -445,7 +446,7 @@ class ColGroup:
         if raw:
             dims = 'raw'
             starts = list()
-            active = pd.get_dummies(df[[c for c in df.columns if c in binarized.columns]])
+            active = pd.get_dummies(df[self.cols])
             for f in topfams:
                 choice = labels[labels == f].sample(1).index
                 starts.append(active.loc[choice].values)
