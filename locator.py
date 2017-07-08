@@ -7,7 +7,6 @@ import copy,fbpca,yaml,hashlib,pickle,nltk,sys,nltk,optparse,os,prince
 from progress import progress
 from matplotlib import pyplot as plt
 from spectral import kmeans
-from polinsk import *
 
 # for cli usage #
 #---------------#
@@ -42,7 +41,6 @@ parser.add_option(
 parser.add_option(
     "-w",
     "--with-clustering",
-    action="store_true",
     dest="with_clustering",
     help="when set, the evaluation of a feature group will perform clustering of the two large families and check the resulting silhouette coefficient"
 )
@@ -99,16 +97,16 @@ parser.add_option(
 # globals #
 #--------#
 wals = pd.read_csv('wals.csv',na_filter=False)
+areas = yaml.load(open('wals-areas.yml'))
+polinsk = yaml.load(open('polinsk.yml'))
+
 binarized = wals.ix[:,10:].replace(to_replace=".+",regex=True,value=1)
 binarized = binarized.replace(to_replace="",value=0)
 
-headclass_indices = islang(wals,heads)
-ratioclass_indices = islang(wals,ratios)
 
 featfullnames = wals.columns[10:]
 feature2area = dict()
 code2feature = dict()
-areas = yaml.load(open('wals-areas.yml'))
 for area,codes in areas.items():
     for code in codes:
         feature2area[code] = area
@@ -123,6 +121,17 @@ for name in featfullnames:
 
 # helpers #
 #---------#
+def like(str1,str2,strict=True):
+    for sub1 in str1.split(" "):
+        for sub2 in str2.split(" "):
+            if strict:
+                cond = sub1.lower() == sub2.lower()
+            else:
+                cond = (sub1 in sub2) or (sub2 in sub1)
+            if cond:
+                return True
+    return False
+
 def rebinarize():
     b = wals.ix[:,10:].replace(to_replace=".+",regex=True,value=1)
     b = b.replace(to_replace="",value=0)
@@ -186,7 +195,10 @@ def asess(df):
         print(str(e))        
         return None
 
-
+# helper dependant globals #
+#-------------------------#
+#headclass_indices = islang(sum([l for c,l in polinsk['heads'].items()],[]))
+#ratioclass_indices = islang(sum([l for c,l in polinsk['ratios'].items()],[]))
        
 class Locator:
     def __init__(self,minrows,cutoff=2,sil_cutoff=0.5,limit=None,heterogenous=None, \
@@ -195,6 +207,9 @@ class Locator:
         self.dryrun = dryrun
         self.cutoff = float(cutoff or 2)
         self.sil_cutoff = sil_cutoff
+        if with_clustering and with_clustering not in ['genetic','ratio']:
+            print('with_clustering (-w) is either "genetic" or "ratio"')
+            quit()
         self.with_clustering = with_clustering
         self.random_limit = limit
         self.heterogenous = heterogenous
@@ -347,8 +362,8 @@ class Locator:
                             qs[k] = [qind]
                         if  qind > self.cutoff:
                             colgroup = ColGroup(cols,asessment,allow_empty=self.allow_empty)
-                            if self.with_clustering:
-                                sil = colgroup.gen_separation()
+                            if self.with_clustering in ['ratio','genetic']:
+                                sil = colgroup.gen_separation() if self.with_clustering == 'genetic' else colgroup.ratio_separation()
                             if (self.with_clustering and sil >= self.sil_cutoff) or not self.with_clustering:
                                 flagged.append(colgroup)
                     asessed.add(groupkey)
@@ -390,43 +405,42 @@ class ColGroup:
         self.numcols = len(cols)
         self.numrows = chunk_wals(self.cols,False)
         self.fields = nltk.FreqDist([feature2area[c] for c in self.cols])
-        self.silhouette_score = None
+        self.ratio_silhouettes = None
+        self.genetic_silhouettes = None
+        self.ratio_silhouette_score = None
+        self.genetic_silhouette_score = None
         self.allow_empty = allow_empty
         self.mca = None
+        self.known_vnratios = 0
     
     def fields_spread(self):
         return self.fields.most_common(1)[0][1]/float(self.fields.N())
     
+    def get_table(self):
+        return chunk_wals(self.cols,True,False,self.allow_empty)
+
     def gen_separation(self,n_clusts=2):
-        df =  chunk_wals(self.cols,True,False)
+        df = self.get_table()         
         families = nltk.FreqDist(df['family'])
         topfams = [fam[0] for fam in families.most_common(n_clusts)]
-        active = df[[c for c in df.columns if c in binarized.columns]]
-        mca = prince.MCA(active,n_components=-1)
         labels = df['family'][df['family'].isin(topfams)]
-        silhouettes = list()
-        binact = pd.get_dummies(active)
-        filtered = binact.loc[labels.index]
-        silhouettes.append((-1,silsc(filtered,labels)))
-        silhouettes.append((0,silsc(filtered,labels,hamming)))
-        for i in range(1,len(mca.eigenvalues)+1):
-            filtered = mca.row_principal_coordinates[np.arange(i)].loc[labels.index]
-            silhouettes.append((i,silsc(filtered,labels)))
-        self.silhouettes = silhouettes
-        self.silhouette_score = sorted(silhouettes,key=lambda x: x[1],reverse=True)[0][1]
+        silhouettes  = self.silhouettes(labels)
+        self.genetic_silhouettes = silhouettes
+        self.genetic_silhouette_score = sorted(silhouettes,key=lambda x: x[1],reverse=True)[0][1]
         self.families = families
-        self.mca = mca
-        return self.silhouette_score
+        return self.genetic_silhouette_score
     
-    def plot_silhouettes(self):
+    def plot_silhouettes(self,mode='genetic'):
         thresh = 0.5
-        maxdim = self.silhouettes[-1][0]
-        minscore = sorted(self.silhouettes,key=lambda x: x[1])[0][1]
+        sils = self.genetic_silhouettes if mode == 'genetic' else self.ratio_silhouettes
+        maxdim = sils[-1][0]
+        minscore = sorted(sils,key=lambda x: x[1])[0][1]
+        maxscore = self.genetic_silhouette_score if mode == 'genetic' else self.ratio_silhouette_score
         sd = self.significant_dimensions(thresh)
         plt.ylabel('average silhouette coefficient')
         plt.xlabel('dimensions used')
-        x = [d for d,s in self.silhouettes]
-        y = [s for d,s in self.silhouettes]
+        x = [d for d,s in sils]
+        y = [s for d,s in sils]
         
         plt.scatter(x[0],y[0],color='g',label='without MCA (Eucledian)')
         plt.scatter(x[1],y[1],color='r',label='without MCA (Hamming)')
@@ -434,13 +448,63 @@ class ColGroup:
         plt.plot(x[2:],y[2:],label='by MCA projection')
         plt.xticks(np.arange(0,maxdim))
         plt.grid()
-        plt.vlines([sd],ymin=minscore,ymax=self.silhouette_score,linestyles="dashed",label="{:.1f} of the variance explained".format(thresh))
+        plt.vlines([sd],ymin=minscore,ymax=maxscore,linestyles="dashed",label="{:.1f} of the variance explained".format(thresh))
         plt.legend()
     
-    def add_clustering_data(self,n_clusts=2,raw=False):
+    def add_ratio_column(self,columns=['Name','genus','family']):
+        df = self.get_table()
+        if 'verb-noun-ratio' in df.columns:
+            df = df.drop('verb-noun-ratio',1)
+        ratios = list()
+        count = 0
+        for i,r in df.iterrows():
+            known = False
+            for c,l in polinsk['ratios'].items():
+                for lang in l:
+                    for column in columns:
+                        if like(r[column],lang):
+                            ratios.append(c)
+                            known = True
+                            count += 1
+                            break
+            if not known:
+                ratios.append('unknown')
+        df.insert(0,'verb-noun-ratio',pd.Series(ratios,index=df.index))
+        self.known_vnratios = count
+        return df
+                
+    def silhouettes(self,labels):
+        df = self.get_table()
+        active = df[self.cols]
+        if self.mca is None:
+            self.mca = prince.MCA(active,n_components=-1)
+        silhouettes = list()
+        binact = pd.get_dummies(active)
+        filtered = binact.loc[labels.index]
+        for v in np.nditer(filtered.values):
+            if np.isinf(v) :
+                print('inf',v)
+            if np.isnan(v):
+                print('nan',v)
+
+        silhouettes.append((-1,silsc(filtered,labels)))
+        silhouettes.append((0,silsc(filtered,labels,hamming)))
+        for i in range(1,len(self.mca.eigenvalues)+1):
+            filtered = self.mca.row_principal_coordinates[np.arange(i)].loc[labels.index]
+            silhouettes.append((i,silsc(filtered,labels)))
+        return silhouettes
+
+    def ratio_separation(self):
+        df = self.add_ratio_column()
+        labels = df.loc[df['verb-noun-ratio'] != 'unknown']['verb-noun-ratio']
+        self.ratio_silhouettes = self.silhouettes(labels)
+        self.ratio_silhouette_score = sorted(self.ratio_silhouettes,key=lambda x: x[1],reverse=True)[0][1]
+        return self.ratio_silhouette_score
+
+    def add_genetic_data(self,n_clusts=2,raw=False):
         self.gen_separation(n_clusts)
         df =  chunk_wals(self.cols,True,False)
-        dims = sorted(self.silhouettes,key=lambda x: x[1],reverse=True)[0][0]
+        dims = sorted(self.genetic_silhouettes,key=lambda x: x[1],reverse=True)[0][0]
         topfams = [fam[0] for fam in self.families.most_common(n_clusts)]
         labels = df['family'][df['family'].isin(topfams)]
         if raw:
@@ -462,7 +526,7 @@ class ColGroup:
         prediter = iter(pred)
         for i in df.index:
             addcolumn.append(next(prediter) if i in labels.index else 'other')
-        df["kmpredict-{}-{}".format(n_clusts,dims)] = pd.Series(addcolumn,index=df.index)
+        df.insert(0,"kmpredict-{}-{}".format(n_clusts,dims),pd.Series(addcolumn,index=df.index))
         return df
         
     def significant_dimensions(self,thresh=0.6):
@@ -471,7 +535,7 @@ class ColGroup:
                 return i
 
     def to_csv(self,binary=False,allow_empty=0,filename=None):
-        df = chunk_wals(self.cols,True,False,self.allow_empty)
+        df = self.get_table()
         if filename is None:
             filename = "-".join(self.cols + [str(self.numrows)])+'.csv'
         if binary:
@@ -497,7 +561,7 @@ features:
             self.fields.pformat().replace("FreqDist({","").strip("})"),
             "\n\r".join(self.colnames)
         )
-        if isinstance(self.silhouette_score,float):
+        if isinstance(self.genetic_silhouette_score,float):
             top2 = self.families.most_common(2)
             ret += """
 family1: {0:d} ({1:s}), 
@@ -507,7 +571,14 @@ separation: {4:.2f}""".format(
             top2[0][0],
             top2[1][1],
             top2[1][0],
-            self.silhouette_score
+            self.genetic_silhouette_score
+        )
+        if isinstance(self.ratio_silhouette_score,float):
+            ret += """
+known verb noun ratios: {0:d} 
+separation: {1:.2f}""".format(
+            self.known_vnratios,
+            self.ratio_silhouette_score
         )
         return ret
 
