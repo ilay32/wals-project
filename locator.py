@@ -412,6 +412,7 @@ class ColGroup:
         self.allow_empty = allow_empty
         self.mca = None
         self.known_vnratios = 0
+        self.feature_weights = None
     
     def fields_spread(self):
         return self.fields.most_common(1)[0][1]/float(self.fields.N())
@@ -533,6 +534,29 @@ class ColGroup:
         for i,cm in enumerate(self.mca.cumulative_explained_inertia,1):
             if cm >= thresh:
                 return i
+    
+    def loadings(self):
+        d = pd.get_dummies(self.get_table()[self.cols])
+        dcols = d.columns
+        U,s,V = fbpca.pca(d,len(dcols),raw=False)
+        comps = ['comp.'+str(i) for i in np.arange(len(dcols))]
+        return pd.DataFrame(V.T,index=dcols,columns=comps)
+
+    def weights(self,comps=5):
+        """
+        :comps: number of PCs for which to compute the features' weights 
+        """
+        loadings = self.loadings()
+        ret = dict()
+        for c in self.cols:
+            entries = loadings.loc[loadings.index.str.startswith(c)]
+            ret[c] = np.square(entries[np.arange(comps)]).sum(axis=0)
+        self.feature_weights = ret
+        return ret
+
+            
+
+
 
     def to_csv(self,binary=False,allow_empty=0,filename=None):
         df = self.get_table()
