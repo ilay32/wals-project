@@ -100,6 +100,17 @@ wals = pd.read_csv('wals.csv',na_filter=False)
 areas = yaml.load(open('wals-areas.yml'))
 polinsk = yaml.load(open('polinsk.yml'))
 
+# this patches up the Zapotec (Zoogocho) row
+# on basis of other zapotec languages. 
+zapvals =  [
+    ('84A', '1 VOX'), #by the Mitla dialect
+    ('85A', '2 Prepositions'), #by the Isthmus,Yatzatchi and Mitla dialects
+    ('86A', '2 Noun-Genitive'), #by the Isthmus,Yatzatchi and Mitla dialects
+    ('91A', '1 Degree word-Adjective'),#by the Isthmus dialect
+]
+for feat,val in zapvals:
+    wals.loc[wals['Name'] == 'Zapotec (Zoogocho)',feat] = val
+
 binarized = wals.ix[:,10:].replace(to_replace=".+",regex=True,value=1)
 binarized = binarized.replace(to_replace="",value=0)
 
@@ -452,7 +463,7 @@ class ColGroup:
         plt.vlines([sd],ymin=minscore,ymax=maxscore,linestyles="dashed",label="{:.1f} of the variance explained".format(thresh))
         plt.legend()
     
-    def add_ratio_column(self,columns=['Name','genus','family']):
+    def loose_ratio_column(self,columns=['Name','genus','family']):
         df = self.get_table()
         if 'verb-noun-ratio' in df.columns:
             df = df.drop('verb-noun-ratio',1)
@@ -473,7 +484,28 @@ class ColGroup:
         df.insert(0,'verb-noun-ratio',pd.Series(ratios,index=df.index))
         self.known_vnratios = count
         return df
-                
+    
+    def add_ratio_column(self):
+        df = self.get_table()
+        if 'verb-noun-ratio' in df.columns:
+            df = df.drop('verb-noun-ratio',1)
+        ratios = list()
+        count = 0
+        for i,r in df.iterrows():
+            known = False
+            for c,l in polinsk['ratios'].items():
+                for lang in l:
+                    if r['Name'] == lang:
+                        ratios.append(c)
+                        known = True
+                        count += 1
+                        break
+            if not known:
+                ratios.append('unknown')
+        df.insert(0,'verb-noun-ratio',pd.Series(ratios,index=df.index))
+        self.known_vnratios = count
+        return df
+           
     def silhouettes(self,labels):
         df = self.get_table()
         active = df[self.cols]
@@ -612,3 +644,4 @@ if __name__ == '__main__':
     loc = Locator(minrows,**opts.__dict__)
     loc.main()
     
+
