@@ -13,6 +13,7 @@ __pycache__/
 *.yml
 *.pkl
 *.csv
+*.xls*
 
 #temp stuff
 *.swp
