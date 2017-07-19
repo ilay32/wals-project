@@ -100,16 +100,6 @@ wals = pd.read_csv('wals.csv',na_filter=False)
 areas = yaml.load(open('wals-areas.yml'))
 polinsk = yaml.load(open('polinsk.yml'))
 
-# this patches up the Zapotec (Zoogocho) row
-# on basis of other zapotec languages. 
-zapvals =  [
-    ('84A', '1 VOX'), #by the Mitla dialect
-    ('85A', '2 Prepositions'), #by the Isthmus,Yatzatchi and Mitla dialects
-    ('86A', '2 Noun-Genitive'), #by the Isthmus,Yatzatchi and Mitla dialects
-    ('91A', '1 Degree word-Adjective'),#by the Isthmus dialect
-]
-for feat,val in zapvals:
-    wals.loc[wals['Name'] == 'Zapotec (Zoogocho)',feat] = val
 
 binarized = wals.ix[:,10:].replace(to_replace=".+",regex=True,value=1)
 binarized = binarized.replace(to_replace="",value=0)
@@ -127,7 +117,17 @@ for name in featfullnames:
     wals = wals.rename(columns={name : code})
     binarized = binarized.rename(columns={name : code})
 
-        
+# this patches up the Zapotec (Zoogocho) row
+# on basis of other zapotec languages. 
+zapvals =  [
+    ('84A', '1 VOX'), #by the Mitla dialect
+    ('85A', '2 Prepositions'), #by the Isthmus,Yatzatchi and Mitla dialects
+    ('86A', '2 Noun-Genitive'), #by the Isthmus,Yatzatchi and Mitla dialects
+    ('91A', '1 Degree word-Adjective'),#by the Isthmus dialect
+]
+for feat,val in zapvals:
+    wals.loc[wals['Name'] == 'Zapotec (Zoogocho)',feat] = val
+       
 
 
 # helpers #
@@ -168,7 +168,7 @@ def subs(l):
         cop.remove(item)
         yield cop
 
-def chunk_wals(columns,chunk=True,just_actives=True,allow_empty=0):
+def chunk_wals(columns,just_actives=True,allow_empty=0):
     global binarized
     bchunk = binarized[columns]
     full = bchunk.sum(axis=1) == len(columns)
@@ -180,31 +180,8 @@ def chunk_wals(columns,chunk=True,just_actives=True,allow_empty=0):
             add = notfull.sample(allow_empty)
             almostfull = bchunk[full].append(add).sort_index()
             indices = almostfull.index
-    if chunk:
-        cols = columns if just_actives else np.concatenate((wals.columns[0:10],columns))
-        return wals.loc[indices][cols]
-    else:
-        return np.count_nonzero(full)
-
-def asess(df):
-    numvars = len(df.columns)
-    rawdata = pd.get_dummies(df).values
-    numcats = rawdata.shape[1]
-    N = np.sum(rawdata)
-    P = rawdata/N
-    csums = P.sum(axis=0)
-    rsums = P.sum(axis=1)
-    expected = rsums.reshape(-1,1).dot(csums.reshape(1,-1))
-    stand = np.diag(1/np.sqrt(rsums)).dot(P - expected).dot(np.diag(1/np.sqrt(csums)))
-    try:
-        x,y,z = fbpca.pca(stand,numcats,raw=True)
-        y = np.square(y)
-        total_inertia = numcats/numvars - 1
-        indicator = numcats*y[0]/total_inertia
-        return indicator,y[0]/total_inertia,y[1]/total_inertia
-    except Exception as e:
-        print(str(e))        
-        return None
+    cols = columns if just_actives else np.concatenate((wals.columns[0:10],columns))
+    return wals.loc[indices][cols]
 
 # helper dependant globals #
 #-------------------------#
@@ -233,10 +210,10 @@ class Locator:
         self.target_langs = target_langs
         self.totalfeatures = 0
 
-    def satisfies(self,colgroup):
-        l = len(colgroup)
+    def satisfies(self,cols):
+        l = len(cols)
         minrows = self.minrows
-        sums = np.sum(binarized[colgroup],axis=1)
+        sums = np.sum(binarized[cols],axis=1)
         subtract = self.allow_empty if l > self.allow_empty else 0
         fullrows = sums[sums >= (l - subtract)]
         if self.target_langs is not None:
@@ -245,11 +222,11 @@ class Locator:
         # check if there's a subset of the covered languages that's larger than minrows and does not
         # include features from the dominant field
         if self.heterogenous is not None and len(fullrows) > minrows:
-            fields = nltk.FreqDist([feature2area[c] for c in colgroup])
+            fields = nltk.FreqDist([feature2area[c] for c in cols])
             if fields.freq(fields.max()) > self.heterogenous:
                 for feature in binarized.columns:
-                    if feature2area[feature] != fields.max() and feature not in colgroup:
-                        sums2 = np.sum(binarized[colgroup + [feature]],axis=1)
+                    if feature2area[feature] != fields.max() and feature not in cols:
+                        sums2 = np.sum(binarized[cols + [feature]],axis=1)
                         fullrows2 = len(sums2[sums2 == l + 1])
                         if fullrows2 > minrows:
                             return True
@@ -360,26 +337,24 @@ class Locator:
             print("asessing {:d} long groups".format(i+1))
             icols = allcols[i]
             for j,cols in enumerate(icols):
-                progress(j,len(icols),50,"flagged:{:d}".format(len(flagged)))
+                progress(j,len(icols),min(len(icols),50),"flagged:{:d}".format(len(flagged)))
                 groupkey = "".join(sorted(cols))
                 if groupkey not in asessed:
-                    asessment = asess(chunk_wals(cols))
-                    if asessment is not None:
-                        qind = asessment[0]
-                        k = str(i+1)+'-long'
-                        if k in qs:
-                            qs[k].append(qind)
-                        else:
-                            qs[k] = [qind]
-                        if  qind > self.cutoff:
-                            colgroup = ColGroup(cols,asessment,allow_empty=self.allow_empty)
-                            if self.with_clustering in ['ratio','genetic']:
-                                sil = colgroup.gen_separation() if self.with_clustering == 'genetic' else colgroup.ratio_separation()
-                            if (self.with_clustering and sil >= self.sil_cutoff) or not self.with_clustering:
-                                flagged.append(colgroup)
+                    group = ColGroup(cols,allow_empty=self.allow_empty)
+                    group.determine_spectral_data()
+                    qind = group.quality_index
+                    k = str(i+1)+'-long'
+                    if k in qs:
+                        qs[k].append(qind)
+                    else:
+                        qs[k] = [qind]
+                    if  qind > self.cutoff:
+                        if self.with_clustering in ['ratio','genetic']:
+                            sil = group.gen_separation() if self.with_clustering == 'genetic' else group.ratio_separation()
+                        if (self.with_clustering and sil >= self.sil_cutoff) or not self.with_clustering:
+                            flagged.append(group)
                     asessed.add(groupkey)
             print()
-
         if self.heterogenous:
             savefile += "-heterogenous-{:.1f}".format(self.heterogenous)
         if self.limit:
@@ -406,30 +381,70 @@ class Locator:
 
 class ColGroup:
     csv_dir = 'chunked-feature-sets'
-    def __init__(self,cols,asessment=None,allow_empty=0):
+    def __init__(self,cols,allow_empty=0):
         self.cols = cols
+        self.allow_empty = allow_empty
         self.colnames = [code2feature[c] for c in cols]
-        self.asessment = asessment or asess(chunk_wals(cols))
-        self.quality_index = self.asessment[0]
-        self.dim1  = self.asessment[1]
-        self.dim2 = self.asessment[2]
         self.numcols = len(cols)
-        self.numrows = chunk_wals(self.cols,False)
+        self.numrows = len(self.get_table())
         self.fields = nltk.FreqDist([feature2area[c] for c in self.cols])
         self.ratio_silhouettes = None
         self.genetic_silhouettes = None
         self.ratio_silhouette_score = None
         self.genetic_silhouette_score = None
-        self.allow_empty = allow_empty
         self.mca = None
+        self.svd = None
+        self.quality_index = None
+        self.dim1 = None
+        self.dim2 = None
+        self.dcols = None
         self.known_vnratios = 0
         self.feature_weights = None
+        
+    #legacy, if we gauge importance by bare pca on dummies, let the index be so too 
+    def mca_asess(self):
+        df = self.get_table()[self.cols]
+        numvars = self.numcols
+        rawdata = pd.get_dummies(df)
+        numcats = rawdata.shape[1]
+        N = np.sum(rawdata)
+        P = rawdata/N
+        csums = P.sum(axis=0)
+        rsums = P.sum(axis=1)
+        expected = rsums.reshape(-1,1).dot(csums.reshape(1,-1))
+        stand = np.diag(1/np.sqrt(rsums)).dot(P - expected).dot(np.diag(1/np.sqrt(csums)))
+        try:
+            x,y,z = fbpca.pca(stand,numcats,raw=True)
+            y = np.square(y)
+            total_inertia = numcats/numvars - 1
+            indicator = numcats*y[0]/total_inertia
+            return indicator,y[0]/total_inertia,y[1]/total_inertia
+        except Exception as e:
+            print(str(e))        
+            return (None,None,None)
+    
+    def asess(self):
+        dcols = self.decomp()
+        if self.svd != "not converged":
+            U,s,V = self.decomp()
+            s = np.square(s)
+            tot = sum(s)
+            return  V.shape[0] * s[0] / tot, s[0]/tot, s[1]/tot
+        return np.nan,np.nan,np.nan
+
+    def determine_spectral_data(self):
+        asessment = self.asess()
+        self.quality_index = asessment[0]
+        self.dim1  = asessment[1]
+        self.dim2 = asessment[2]
+
+        
     
     def fields_spread(self):
         return self.fields.most_common(1)[0][1]/float(self.fields.N())
     
     def get_table(self):
-        return chunk_wals(self.cols,True,False,self.allow_empty)
+        return chunk_wals(self.cols,False,self.allow_empty)
 
     def gen_separation(self,n_clusts=2):
         df = self.get_table()         
@@ -507,10 +522,13 @@ class ColGroup:
         return df
            
     def silhouettes(self,labels):
-        df = self.get_table()
-        active = df[self.cols]
+        active = self.get_table()[self.cols]
         if self.mca is None:
-            self.mca = prince.MCA(active,n_components=-1)
+            try:
+                self.mca = prince.MCA(active,n_components=-1)
+            except Exception as e:
+                print(str(e))
+                return None
         silhouettes = list()
         binact = pd.get_dummies(active)
         filtered = binact.loc[labels.index]
@@ -531,12 +549,14 @@ class ColGroup:
         df = self.add_ratio_column()
         labels = df.loc[df['verb-noun-ratio'] != 'unknown']['verb-noun-ratio']
         self.ratio_silhouettes = self.silhouettes(labels)
+        if self.ratio_silhouettes is None:
+            return np.nan
         self.ratio_silhouette_score = sorted(self.ratio_silhouettes,key=lambda x: x[1],reverse=True)[0][1]
         return self.ratio_silhouette_score
 
     def add_genetic_data(self,n_clusts=2,raw=False):
         self.gen_separation(n_clusts)
-        df =  chunk_wals(self.cols,True,False)
+        df = self.get_table()
         dims = sorted(self.genetic_silhouettes,key=lambda x: x[1],reverse=True)[0][0]
         topfams = [fam[0] for fam in self.families.most_common(n_clusts)]
         labels = df['family'][df['family'].isin(topfams)]
@@ -567,18 +587,33 @@ class ColGroup:
             if cm >= thresh:
                 return i
     
+    def decomp(self):
+        if self.svd is None:
+            try:
+                d = pd.get_dummies(self.get_table()[self.cols])
+                self.dcols = d.columns
+                self.svd = fbpca.pca(d,d.shape[1],raw=False)
+            except Exception as e:
+                print(str(e))
+                self.svd = "not converged"
+        return self.dcols
+    
     def loadings(self):
-        d = pd.get_dummies(self.get_table()[self.cols])
-        dcols = d.columns
-        U,s,V = fbpca.pca(d,len(dcols),raw=False)
-        comps = ['comp.'+str(i) for i in np.arange(len(dcols))]
-        return pd.DataFrame(V.T,index=dcols,columns=comps)
+        #dcols = self.decomp()
+        dcols =  pd.get_dummies(self.get_table()[self.cols]).columns
+        if self.svd != "not converged":
+            U,s,V = self.svd
+            comps = ['comp.'+str(i) for i in np.arange(V.shape[0])]
+            return pd.DataFrame(V.T,index=dcols,columns=comps)
+        return None 
 
     def weights(self,comps=5):
         """
         :comps: number of PCs for which to compute the features' weights 
         """
         loadings = self.loadings()
+        if loadings is None:
+            return None
         ret = dict()
         for c in self.cols:
             entries = loadings.loc[loadings.index.str.startswith(c)]
