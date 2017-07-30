@@ -89,6 +89,7 @@ parser.add_option(
 #--------#
 wals = pd.read_csv('wals.csv',na_filter=False)
 areas = yaml.load(open('wals-areas.yml'))
+phonsubs = yaml.load(open('phonology-subareas.yml'))
 polinsk = yaml.load(open('polinsk.yml'))
 
 
@@ -123,6 +124,13 @@ for feat,val in zapvals:
 
 # helpers #
 #---------#
+def phonsub(f):
+    if f == '3A':
+        return 'consontants and vowels'
+    for sub,feats in phonsubs.items():
+        if f in feats:
+            return sub
+
 def like(str1,str2,strict=True):
     for sub1 in str1.split(" "):
         for sub2 in str2.split(" "):
@@ -227,7 +235,7 @@ class Locator:
                 else:
                     self.hetreject.append(1)
                 return False
-        return len(fullrows) > minrows
+        return len(fullrows) >= minrows
 
 
 
@@ -321,6 +329,8 @@ class Locator:
             exc = self.exclude if isinstance(self.exclude,list) else [self.exclude]
             if verify_areas(exc):
                 binarized = binarized[[c for c in binarized.columns if feature2area[c] not in exc]]
+            elif verify_features(exc):
+                binarized = binarized[[c for c in binarized.columns if c not in exc]]
                 savefile += "-exc-{}".format("-".join(exc))
         self.totalfeatures = len(binarized.columns)
         allcols = self.locate_all_columns()
@@ -414,6 +424,23 @@ class ColGroup:
             print(str(e))        
             return (None,None,None)
     
+    def phonology_subareas(self):
+        phon = dict()
+        for sub,feats in phonsubs.items():
+            phon[sub] = [c for c in self.cols if c in feats]
+        self.phonology = phon
+
+    def phonology_spread(self):
+        if self.phonology is None:
+            self.phonology_subareas()
+        submax,subcount = 0,0
+        for sub,feats in self.phonology.items():
+            if len(feats) > 0:
+                subcount += 1
+            if len(feats) > submax:
+                submax = len(feats)
+        return submax/self.numcols,subcount
+    
     def asess(self):
         dcols = self.decomp()
         if self.svd != "not converged":
@@ -429,8 +456,6 @@ class ColGroup:
         self.dim1  = asessment[1]
         self.dim2 = asessment[2]
 
-        
-    
     def fields_spread(self):
         return self.fields.most_common(1)[0][1]/float(self.fields.N())
     
