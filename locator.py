@@ -412,6 +412,7 @@ class Locator:
 
 class ColGroup:
     csv_dir = 'chunked-feature-sets'
+    colors = ['r','g','b','c','k','y']
     def __init__(self,cols,allow_empty=0):
         self.cols = cols
         self.allow_empty = allow_empty
@@ -419,24 +420,70 @@ class ColGroup:
         self.numcols = len(cols)
         self.numrows = len(self.get_table())
         self.fields = nltk.FreqDist([feature2area[c] for c in self.cols])
-        self.ratio_silhouettes = None
-        self.genetic_silhouettes = None
-        self.ratio_silhouette_score = None
-        self.genetic_silhouette_score = None
+        self._silhouettes = dict()
         self.mca = None
-        self.svd = None
+        self.pca = None
+        self._mode = 'pca'
+        self.families = nltk.FreqDist(self.get_table()['family'])
+        consistent = sorted(self.families.most_common(),key=lambda p: p[0])
+        consistent.sort(key = lambda p: p[1],reverse=True)
+        self.consistent_families = consistent
         self.quality_index = None
         self.dim1 = None
         self.dim2 = None
-        self.dcols = None
         self.known_vnratios = 0
-        self.feature_weights = None
-        
+        self.phonology = None
+        self.current_axis = None
+        self.categories = None
+        self.bogus_seed = int("".join([c for c in "".join(self.cols) if c.isdigit()])) % (2**32 - 1)
+    
+    def require_pc(fn):
+        def wrap(self,*args,**kwargs):
+            if self.mode == 'mca':
+                if not isinstance(self.mca,Exception):
+                    if self.mca is None:
+                        try:
+                            self.mca = prince.MCA(self.get_table()[self.cols],n_components=-1)
+                            self.categories = self.mca.P.columns
+                        except Exception as e:
+                            self.mca = e
+                            print(str(e))
+                            return None
+            elif not isinstance(self.pca,Exception):
+                if self.pca is None:
+                    try:
+                        d = pd.get_dummies(self.get_table()[self.cols])
+                        U,s,V = fbpca.pca(d,d.shape[1],raw=False)
+                        self.pca = np.square(s),V
+                        self.categories = d.columns
+                    except Exception as e:
+                        self.pca = e
+                        print(str(e))
+                        return None
+            return fn(self,*args,**kwargs)
+        return wrap
+
+    @property
+    def mode(self):
+        return self._mode
+    
+    @mode.setter
+    def mode(self,mode):
+        self._mode = mode
+        self.determine_spectral_data()
+    
+    @property
+    def silhouettes(self):
+        if self.mode not in self._silhouettes:
+            self._silhouettes[self.mode] = pd.DataFrame(columns=np.arange(len(self.categories)+2))
+        return self._silhouettes[self.mode]
+    
+
     #legacy, if we gauge importance by bare pca on dummies, let the index be so too 
     def mca_asess(self):
         df = self.get_table()[self.cols]
         numvars = self.numcols
-        rawdata = pd.get_dummies(df)
+        rawdata = pd.get_dummies(df).values
         numcats = rawdata.shape[1]
         N = np.sum(rawdata)
         P = rawdata/N
@@ -471,15 +518,16 @@ class ColGroup:
                 submax = len(feats)
         return submax/self.numcols,subcount
     
+    @require_pc
     def asess(self):
-        dcols = self.decomp()
-        if self.svd != "not converged":
-            U,s,V = self.decomp()
-            s = np.square(s)
+        if self.mode == 'mca':
+            ei = self.mca.explained_inertia
+            return ei[0]*self.mca._Base__k, ei[0],ei[1]
+        elif self.mode == 'pca':
+            s,V = self.pca
             tot = sum(s)
             return  V.shape[0] * s[0] / tot, s[0]/tot, s[1]/tot
-        return np.nan,np.nan,np.nan
-
+    
     def determine_spectral_data(self):
         asessment = self.asess()
         self.quality_index = asessment[0]
@@ -500,38 +548,47 @@ class ColGroup:
         #self.target_genuses_counts = [(g,genuses[g]) for g in target_genuses]
         return self.best_silhouette('genus')[0]
     
+    def best_silhouette(self,kind,n_clusts=None):
+        k = kind
+        if  n_clusts is not None:
+            if kind +'-'+str(n_clusts) in self.silhouettes.index:
+                k = kind + '-' + str(n_clusts)
+            else:
+                for i in range(15):
+                    if kind + '-' + str(i) in self.silhouettes.index:
+                        k = kind + '-' + str(i)
+                        break
+        if k not in self.silhouettes.index:
+            print("must run the",kind,"method first")
+            return None
+        sils = self.silhouettes.loc[k]
+        return sils.max(),sils.argmax() - 1
 
     def gen_separation(self,n_clusts=2):
         df = self.get_table()         
-        families = nltk.FreqDist(df['family'])
-        topfams = [fam[0] for fam in families.most_common(n_clusts)]
+        topfams = [fam[0] for fam in self.consistent_families[:n_clusts]]
         labels = df['family'][df['family'].isin(topfams)]
-        silhouettes  = self.silhouettes(labels)
-        self.genetic_silhouettes = silhouettes
-        self.genetic_silhouette_score = sorted(silhouettes,key=lambda x: x[1],reverse=True)[0][1]
-        self.families = families
-        return self.genetic_silhouette_score
+        self.silhouettes.loc['genetic-'+str(n_clusts)] = self.compute_silhouettes(labels)
+        return self.best_silhouette('genetic',n_clusts)[0]
     
-    def plot_silhouettes(self,mode='genetic'):
+    def plot_silhouettes(self,kind='genetic',clusts=2):
         thresh = 0.5
-        sils = self.genetic_silhouettes if mode == 'genetic' else self.ratio_silhouettes
-        maxdim = sils[-1][0]
-        minscore = sorted(sils,key=lambda x: x[1])[0][1]
-        maxscore = self.genetic_silhouette_score if mode == 'genetic' else self.ratio_silhouette_score
+        sils = self.silhouettes.loc[kind+'-'+str(clusts)].values
+        maxdim = len(sils) - 1
         sd = self.significant_dimensions(thresh)
         plt.ylabel('average silhouette coefficient')
         plt.xlabel('dimensions used')
-        x = [d for d,s in sils]
-        y = [s for d,s in sils]
+        x = np.arange(-1,len(sils) - 1)
         
-        plt.scatter(x[0],y[0],color='g',label='without MCA (Eucledian)')
-        plt.scatter(x[1],y[1],color='r',label='without MCA (Hamming)')
+        plt.scatter(x[0],sils[0],color='g',label='without MCA (Eucledian)')
+        plt.scatter(x[1],sils[1],color='r',label='without MCA (Hamming)')
         
-        plt.plot(x[2:],y[2:],label='by MCA projection')
+        plt.plot(x[2:],sils[2:],label='by MCA projection')
         plt.xticks(np.arange(0,maxdim))
         plt.grid()
-        plt.vlines([sd],ymin=minscore,ymax=maxscore,linestyles="dashed",label="{:.1f} of the variance explained".format(thresh))
+        plt.vlines([sd],ymin=sils.min(),ymax=sils.max(),linestyles="dashed",label="{:.1f} of the variance explained".format(thresh))
         plt.legend()
+        plt.show()
     
     def loose_ratio_column(self,columns=['Name','genus','family']):
         df = self.get_table()
@@ -575,17 +632,11 @@ class ColGroup:
         df.insert(0,'verb-noun-ratio',pd.Series(ratios,index=df.index))
         self.known_vnratios = count
         return df
-           
-    def silhouettes(self,labels):
-        active = self.get_table()[self.cols]
-        if self.mca is None:
-            try:
-                self.mca = prince.MCA(active,n_components=-1)
-            except Exception as e:
-                print(str(e))
-                return None
+    
+    @require_pc
+    def compute_silhouettes(self,labels):
         silhouettes = list()
-        binact = pd.get_dummies(active)
+        binact = pd.get_dummies(self.get_table()[self.cols])
         filtered = binact.loc[labels.index]
         for v in np.nditer(filtered.values):
             if np.isinf(v) :
@@ -593,27 +644,50 @@ class ColGroup:
             if np.isnan(v):
                 print('nan',v)
 
-        silhouettes.append((-1,silsc(filtered,labels)))
-        silhouettes.append((0,silsc(filtered,labels,hamming)))
-        for i in range(1,len(self.mca.eigenvalues)+1):
-            filtered = self.mca.row_principal_coordinates[np.arange(i)].loc[labels.index]
-            silhouettes.append((i,silsc(filtered,labels)))
+        silhouettes.append(silsc(filtered,labels))
+        silhouettes.append(silsc(filtered,labels,hamming))
+        for numdims in range(1,len(self.categories)+1):
+            filtered = self.projections(labels.index)[np.arange(numdims)]
+            silhouettes.append(silsc(filtered,labels))
         return silhouettes
+    
+    @require_pc
+    def projections(self,indices):
+        if self.mode == 'mca':
+            return self.mca.row_principal_coordinates.loc[indices]
+        else:
+            V = self.pca[1]
+            actdum = pd.get_dummies(self.get_table()[self.cols])
+            return actdum.loc[indices].dot(V.T) 
+    
+    def bogus_labels(self,n_clusts):
+        fams = [f for f,c in self.consistent_families[:n_clusts]]
+        df = self.get_table()
+        indpool = df.loc[df['family'].isin(fams)].index
+        labels = pd.Series(np.nan,index=indpool)
+        np.random.seed(self.bogus_seed)
+        used = pd.Index([])
+        for i,f in enumerate(fams):
+            ind = np.random.choice(indpool.difference(used),self.families[f],replace=False)
+            labels.loc[ind] = "bogus-{:d}".format(int(i+1))
+            used = used.union(ind)
+        return labels
 
+    def bogus_separation(self,n_clusts=2):
+        self.silhouettes.loc['bogus-'+str(n_clusts)] = self.compute_silhouettes(self.bogus_labels(n_clusts))
+        return self.best_silhouette('bogus',n_clusts)[0]
+    
     def ratio_separation(self):
         df = self.add_ratio_column()
         labels = df.loc[df['verb-noun-ratio'] != 'unknown']['verb-noun-ratio']
-        self.ratio_silhouettes = self.silhouettes(labels)
-        if self.ratio_silhouettes is None:
-            return np.nan
-        self.ratio_silhouette_score = sorted(self.ratio_silhouettes,key=lambda x: x[1],reverse=True)[0][1]
-        return self.ratio_silhouette_score
+        self.silhouettes.loc['ratio'] = self.compute_silhouettes(labels)
+        return self.best_silhouette('ratio')[0]
 
     def add_genetic_data(self,n_clusts=2,raw=False):
         self.gen_separation(n_clusts)
         df = self.get_table()
-        dims = sorted(self.genetic_silhouettes,key=lambda x: x[1],reverse=True)[0][0]
-        topfams = [fam[0] for fam in self.families.most_common(n_clusts)]
+        dims = self.best_silhouette('genetic',n_clusts)[0]
+        topfams = [fam[0] for fam in self.consistent_families[:n_clusts]]
         labels = df['family'][df['family'].isin(topfams)]
         if raw:
             dims = 'raw'
@@ -628,7 +702,7 @@ class ColGroup:
             pred = pred.flatten()
             print(pred)
         else:
-            filtered = self.mca.row_principal_coordinates[np.arange(dims)].loc[labels.index]
+            filtered = self.projections(labels.index)[np.arange(dims)]
             pred = km(n_clusters=n_clusts,n_init=15).fit_predict(filtered)
         addcolumn = list()
         prediter = iter(pred)
@@ -636,32 +710,164 @@ class ColGroup:
             addcolumn.append(next(prediter) if i in labels.index else 'other')
         df.insert(0,"kmpredict-{}-{}".format(n_clusts,dims),pd.Series(addcolumn,index=df.index))
         return df
-        
+    
+    @require_pc
     def significant_dimensions(self,thresh=0.6):
-        for i,cm in enumerate(self.mca.cumulative_explained_inertia,1):
-            if cm >= thresh:
-                return i
-    
-    def decomp(self):
-        if self.svd is None:
-            try:
-                d = pd.get_dummies(self.get_table()[self.cols])
-                self.dcols = d.columns
-                self.svd = fbpca.pca(d,d.shape[1],raw=False)
-            except Exception as e:
-                print(str(e))
-                self.svd = "not converged"
-        return self.dcols
-    
-    def loadings(self):
-        #dcols = self.decomp()
-        dcols =  pd.get_dummies(self.get_table()[self.cols]).columns
-        if self.svd != "not converged":
-            U,s,V = self.svd
-            comps = ['comp.'+str(i) for i in np.arange(V.shape[0])]
-            return pd.DataFrame(V.T,index=dcols,columns=comps)
-        return None 
+        if self.mode == 'mca':
+            for i,cm in enumerate(self.mca.cumulative_explained_inertia,1):
+                if cm >= thresh:
+                    return i
+        else:
+            s = self.pca[0]
+            tot  = sum(s)
+            i = 0
+            cm = 0
+            while i < len(s):
+                cm += s[i]/tot
+                if cm >= thresh:
+                    return i + 1
+                i += 1
+            
 
+    def plot_multifam(self,mincount='auto'):
+        self.current_axis = None
+        mc = self.families.most_common()
+        if mincount == 'auto':
+            mincount = mc[4][1]
+        fams = [f for f,c in mc if c >= mincount]
+        if len(fams) < 2:
+            print("not enough families with",mincount,"languages")
+            return
+        fampairs = [(fams[i],fams[j]) for i in range(len(fams) - 1) for j in range(i+1,len(fams))]
+        numfigs = len(fampairs)
+        if numfigs > 3:
+            nc = 3
+            nr = int(np.ceil(numfigs/3))
+        else:
+            nc = numfigs
+            nr = 1
+        fig, axes = plt.subplots(nrows=nr, ncols=nc,figsize=(12,12))
+        fax = axes.flatten()
+        for i,pair in enumerate(fampairs):
+            axis = fax[i]
+            self.current_axis = axis
+            sil = self.plot_families(fams=pair,multi=True)
+            axis.set_title("{}/{} silhouette: {:.2f}".format(*pair,sil),fontsize=10)
+
+        plt.tight_layout(rect=[0.01, 0.01, 0.99, 0.9])
+        plt.suptitle("Family Pairs with More than {:d} Languages ({:s})\n{:s}".format(mincount,self.mode.upper(),self.comps_line()))
+        if i < len(fax):
+            for a in fax[i+1:]:
+                a.set_visible(False)
+        plt.show()
+    
+    def pcplot(self,points,labels=None,annotate=True):
+        multi = False
+        points = -1 * points
+        ofsmall = 0.03
+        ofbig = 0.1
+        dat = self.get_table()
+        colors = ColGroup.colors
+
+        # figure out where to plot
+        if self.current_axis is None:
+            fig,ax = plt.subplots(figsize=(15,15))
+            self.current_axis = ax
+        else:
+            multi = True
+            ax = self.current_axis
+
+        ax.set_xlim([points.values[:,0].min() - 1,points.values[:,0].max() + 1])
+        ax.set_ylim([points.values[:,1].min() - 1,points.values[:,1].max() + 1])
+
+        # usually the case
+        if labels is not None:
+            ulabels = list(set(labels))
+            if len(ulabels) > len(colors):
+                print("please add colors")
+                return
+            handles = list()
+            for i,label in enumerate(ulabels):
+                lpoints = points[labels == label]
+                x  = lpoints.values[:,0]
+                y = lpoints.values[:,1]
+                if not multi:
+                    handles.append(ax.scatter(x, y, s=50, marker='o',c=colors[i]))
+                else:
+                    ax.scatter(x,y,s=50,marker='o',c=colors[i])
+                if annotate:
+                    positions = [
+                        (ofsmall,ofsmall),
+                        (ofsmall, -0.85 * ofbig),
+                        (-1 * ofbig, ofsmall),
+                        (-1 * ofbig, -0.85 * ofbig)
+                    ]
+                    already = nltk.FreqDist()
+                    for j,r in lpoints.iterrows():
+                        if (r[0],r[1]) in already:
+                            pos = positions[already[(r[0],r[1])]%len(positions)]
+                        else:
+                            pos = positions[0]
+                        ofx = r[0]+pos[0]
+                        ofy = r[1]+pos[1]
+                        ax.text(ofx,ofy,dat.loc[j,'wals_code'],color=colors[i])
+                        already.update({(r[0],r[1]) : 1})
+
+            if not multi: 
+                ax.legend(handles,ulabels)
+        else:
+            x = points.values[:,0]
+            y = points.values[:,1]
+            ax.scatter(x,y,s=50,marker='o',c=colors[0])
+        
+        # chart grid and main axes
+        ax.grid(True,which='both') 
+        ax.spines['bottom'].set_position('zero')
+        ax.spines['right'].set_color('none')
+        ax.spines['top'].set_color('none')
+        ax.spines['left'].set_position('zero')
+    
+    def comps_line(self):
+        self.determine_spectral_data()
+        return "comp1: {0:.2f}%  comp2: {1:.2f}%".format(100*self.dim1,100*self.dim2)
+    
+    @require_pc
+    def plot_bogus(self,n_clusts=2):
+        suptit = "Coloring Languages by Bogus Properties ({})".format(self.mode)
+        labels = self.bogus_labels()
+        points = self.projections(labels.index)
+        sil = self.best_silhouette('bogus',n_clusts)[0]
+        self.pcplot(points,labels)
+        plt.suptitle("{}\n{}  silhouette: {:.2f}".format(suptit,self.comps_line(),sil))
+        plt.show()
+    
+    @require_pc
+    def plot_families(self,fams=None,multi=False):
+        if not multi:
+            self.current_axis = None
+        dat = self.get_table()
+        if fams is None:
+            fams = [f for f,c in self.consistent_families[:2]]
+        labels = dat.loc[dat['family'].isin(fams)]['family']
+        suptit = "{} ({})".format(" ".join(fams),self.mode.upper())
+        points = self.projections(dat['family'].isin(fams))
+        self.pcplot(points,labels)
+        sil = silsc(points.values[:,:2],labels)
+        if not multi:
+            plt.suptitle("{}\n{}  silhouette: {:.2f}".format(suptit,self.comps_line(),sil))
+            plt.show()
+        else:
+            return sil
+    
+    @require_pc
+    def loadings(self):
+        if self.mode == 'pca':
+            V = self.pca[1]
+            #comps = ['comp.'+str(i) for i in np.arange(V.shape[0])]
+            return  pd.DataFrame(V.T,index=self.categories,columns=comps)
+        elif self.mode == 'mca':
+            return self.mca.column_component_contributions*100
+    
     def weights(self,comps=5):
         """
         :comps: number of PCs for which to compute the features' weights 
@@ -673,12 +879,7 @@ class ColGroup:
         for c in self.cols:
             entries = loadings.loc[loadings.index.str.startswith(c)]
             ret[c] = np.square(entries[np.arange(comps)]).sum(axis=0)
-        self.feature_weights = ret
         return ret
-
-            
-
-
 
     def to_csv(self,binary=False,allow_empty=0,filename=None):
         df = self.get_table()
@@ -692,40 +893,45 @@ class ColGroup:
         return df
 
     def __str__(self) :
+        top2 = self.consistent_families[:2]
         ret =  """{0:d} long group covering {1:d} languages
-quality index: {2:.2f}
-dim1: {3:.0%}
-dim2: {4:.0%}
-fields: {5:s}
+in mode {2:s}:
+quality index: {3:.2f}
+PC1: {4:.0%}
+PC2: {5:.0%}
+fields: {6:s}
 features:
-{6:s}""".format(
+{7:s}
+family1: {8:d} ({9:s}) 
+family2: {10:d} ({11:s}) 
+""".format(
             self.numcols, 
             self.numrows, 
+            self.mode.upper(),
             self.quality_index, 
             self.dim1,
             self.dim2,
             self.fields.pformat().replace("FreqDist({","").strip("})"),
-            "\n\r".join(self.colnames)
-        )
-        if isinstance(self.genetic_silhouette_score,float):
-            top2 = self.families.most_common(2)
-            ret += """
-family1: {0:d} ({1:s}), 
-family2: {2:d} ({3:s}), 
-separation: {4:.2f}""".format(
+            "\n\r".join(self.colnames),
             top2[0][1],
             top2[0][0],
             top2[1][1],
-            top2[1][0],
-            self.genetic_silhouette_score
+            top2[1][0]
         )
-        if isinstance(self.ratio_silhouette_score,float):
+        if  'genetic' in self.silhouettes.index:
+            ret += """
+genetic separation: {0:.2f} ({1:d} PCs)""".format(self.best_silhouette('genetic',2))
+    
+        if 'ratio' in self.silhouettes.index:
             ret += """
 known verb noun ratios: {0:d} 
-separation: {1:.2f}""".format(
+ratio separation: {1:.2f} ({2:d} PCs)""".format(
             self.known_vnratios,
-            self.ratio_silhouette_score
+            self.best_silhouette('ratio')
         )
+        if 'bogus' in self.silhouettes.index:
+            ret += """
+bogus separation: {1:.2f} ({2:d} PCs)""".format(self.best_silhouette('bogus',2))
         return ret
 
 if __name__ == '__main__':
@@ -733,5 +939,12 @@ if __name__ == '__main__':
     minrows  = int(args[0])
     loc = Locator(minrows,**opts.__dict__)
     loc.main()
-    
-
+       
+#if __name__ == '__main__':
+#    opts = {
+#        'include' : areas['phonology'],
+#        'cutoff' : 5
+#    }
+#    loc = Locator(200,**opts)
+#    loc.main('discard')
+#
