@@ -207,7 +207,24 @@ class Locator:
         self.cache = list()
         self.limit = limit
         self.target_langs = target_langs
+        self.target_genuses = self.verify_genuses(target_genuses)
+        if loi is not None:
+            lois = loi if isinstance(loi,list) else [loi]
+            self.loi = wals.loc[wals['Name'].isin(lois)].index
+        else:
+            self.loi = None
         self.totalfeatures = 0
+    
+    def verify_genuses(self,genuses):
+        for g in genuses:
+            gcount = np.count_nonzero(wals['genus'] == g)
+            if gcount == 0:
+                print(g,"is not a WALS genus")
+                quit()
+            if gcount < self.minrows:
+                print("there are only",gcount,"languages of genus",g)
+                quit()
+        return genuses
 
     def satisfies(self,cols):
         l = len(cols)
@@ -215,8 +232,21 @@ class Locator:
         sums = np.sum(binarized[cols],axis=1)
         subtract = self.allow_empty if l > self.allow_empty else 0
         fullrows = sums[sums >= (l - subtract)]
+        if self.loi is not None:
+            if len(fullrows.index.intersection(self.loi)) == 0:
+                return False
         if self.target_langs is not None:
             fullrows = fullrows[fullrows.index.intersection(self.target_langs)]
+        if self.target_genuses is not None:
+            inds = pd.Index([])
+            for genus in self.target_genuses:
+                langs = wals[wals['genus'] == genus].index
+                inter = fullrows.index.intersection(langs)
+                if len(inter) < minrows:
+                    return False
+                inds = inds.union(inter)
+            fullrows = fullrows[inds]
+            
         # if the heterogeneity requirement is on, and the group is too homogenous,
         # check if there's a subset of the covered languages that's larger than minrows and does not
         # include features from the dominant field
@@ -461,6 +491,15 @@ class ColGroup:
     
     def get_table(self):
         return chunk_wals(self.cols,False,self.allow_empty)
+    
+    def genus_separation(self,target_genuses):
+        df = self.get_table()
+        labels = df['genus'][df['genus'].isin(target_genuses)]
+        self.silhouettes.loc['genus'] = self.compute_silhouettes(labels)
+        genuses = nltk.FreqDist(df['genus'])
+        #self.target_genuses_counts = [(g,genuses[g]) for g in target_genuses]
+        return self.best_silhouette('genus')[0]
+    
 
     def gen_separation(self,n_clusts=2):
         df = self.get_table()         
