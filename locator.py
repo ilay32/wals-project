@@ -21,15 +21,6 @@ parser.add_option(
 )
 
 parser.add_option(
-    "-d",
-    "--dry-run",
-    dest="dryrun",
-    metavar="DRYRUN",
-    action="store_true",
-    help="don't save flagged results to disk"
-)
-
-parser.add_option(
     "-a",
     "--allow_empty",
     dest="allow_empty",
@@ -190,9 +181,9 @@ def chunk_wals(columns,just_actives=True,allow_empty=0):
        
 class Locator:
     def __init__(self,minrows,cutoff=2,sil_cutoff=0.5,limit=None,heterogenous=None, \
-        include=None,exclude=None,with_clustering=False,allow_empty=0,dryrun=False,target_langs=None):
+        include=None,exclude=None,with_clustering=False,allow_empty=0, \
+        target_langs=None,target_genuses=None,loi=None):
         self.minrows = minrows
-        self.dryrun = dryrun
         self.cutoff = float(cutoff or 2)
         self.sil_cutoff = sil_cutoff
         if with_clustering and with_clustering not in ['genetic','ratio']:
@@ -361,7 +352,7 @@ class Locator:
             savefile += "-randlimit-{:.1f}".format(self.limit)
         if filename is not None:
             savefile = os.path.join('feature-sets',filename)
-        if len(flagged) > 0 and not self.dryrun:
+        if len(flagged) > 0 and filename != 'discard':
             if not os.path.isdir('feature-sets'):
                 os.mkdir('feature-sets')
             with open(savefile+'.pkl','wb') as f:
