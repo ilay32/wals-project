@@ -13,6 +13,14 @@ from spectral import kmeans
 parser = optparse.OptionParser()
 
 parser.add_option(
+    "-f",
+    "--feature-mode",
+    dest="fmode",
+    metavar="FEATURE_MODE",
+    help="shuffle the WALS feature values so that distribution is maintained but the features are rendered bogus"
+)
+
+parser.add_option(
     "-s",
     "--silhouette-score-cutoff",
     dest="sil_cutoff",
@@ -28,7 +36,7 @@ parser.add_option(
     type="int",
     help="specify number of empty cells permitted for feature columns"
 )
-    
+
 parser.add_option(
     "-w",
     "--with-clustering",
@@ -92,6 +100,7 @@ areas = yaml.load(open('wals-areas.yml'))
 phonsubs = yaml.load(open('phonology-subareas.yml'))
 polinsk = yaml.load(open('polinsk.yml'))
 
+bogwals = pd.DataFrame()
 
 binarized = wals.ix[:,10:].replace(to_replace=".+",regex=True,value=1)
 binarized = binarized.replace(to_replace="",value=0)
@@ -110,7 +119,7 @@ for name in featfullnames:
     binarized = binarized.rename(columns={name : code})
 
 # this patches up the Zapotec (Zoogocho) row
-# on basis of other zapotec languages. 
+# on basis of other zapotec languages.
 zapvals =  [
     ('84A', '1 VOX'), #by the Mitla dialect
     ('85A', '2 Prepositions'), #by the Isthmus,Yatzatchi and Mitla dialects
@@ -119,7 +128,7 @@ zapvals =  [
 ]
 for feat,val in zapvals:
     wals.loc[wals['Name'] == 'Zapotec (Zoogocho)',feat] = val
-       
+
 
 
 # helpers #
@@ -167,6 +176,27 @@ def subs(l):
         cop.remove(item)
         yield cop
 
+def bogify_column(f):
+    series = wals[f]
+    cats = series.unique()
+    langs = series[series != ""]
+    ret = pd.Series("",index = series.index)
+    used = pd.Index([])
+    for i,cat in enumerate(cats):
+        if cat == "":
+            continue
+        num = np.count_nonzero(series == cat)
+        inds = np.random.choice(langs.index.difference(used),num,replace=False)
+        ret.loc[inds] = "bogus-{:s}-{:d}".format(f,i)
+        used = used.union(inds)
+    return ret
+
+def bogify_wals():
+    ret = wals.ix[:,0:10]
+    for c in binarized.columns:
+        ret[c] =  bogify_column(c)
+    return ret
+
 def chunk_wals(columns,just_actives=True,allow_empty=0):
     global binarized
     bchunk = binarized[columns]
@@ -186,17 +216,22 @@ def chunk_wals(columns,just_actives=True,allow_empty=0):
 #-------------------------#
 #headclass_indices = islang(sum([l for c,l in polinsk['heads'].items()],[]))
 #ratioclass_indices = islang(sum([l for c,l in polinsk['ratios'].items()],[]))
-       
+
 class Locator:
     def __init__(self,minrows,cutoff=2,sil_cutoff=0.5,limit=None,heterogenous=None, \
         include=None,exclude=None,with_clustering=False,allow_empty=0, \
-        target_langs=None,target_genuses=None,loi=None):
+        target_langs=None,target_genuses=None,loi=None,fmode='true'):
         self.minrows = minrows
         self.cutoff = float(cutoff or 2)
         self.sil_cutoff = sil_cutoff
         if with_clustering and with_clustering not in ['genetic','ratio']:
             print('with_clustering (-w) is either "genetic" or "ratio"')
             quit()
+        if fmode == 'bogus':
+            global wals,bogwals
+            wals = bogify_wals()
+            bogwals = wals
+        self.fmode = fmode
         self.with_clustering = with_clustering
         self.random_limit = limit
         self.heterogenous = heterogenous
@@ -214,8 +249,10 @@ class Locator:
         else:
             self.loi = None
         self.totalfeatures = 0
-    
+
     def verify_genuses(self,genuses):
+        if genuses is None:
+            return None
         for g in genuses:
             gcount = np.count_nonzero(wals['genus'] == g)
             if gcount == 0:
@@ -246,7 +283,7 @@ class Locator:
                     return False
                 inds = inds.union(inter)
             fullrows = fullrows[inds]
-            
+
         # if the heterogeneity requirement is on, and the group is too homogenous,
         # check if there's a subset of the covered languages that's larger than minrows and does not
         # include features from the dominant field
@@ -284,7 +321,7 @@ class Locator:
             rnds = None
             prev = self.locate_columns(numcols - 1)
             willcheck = len(prev) * self.totalfeatures * (numcols - 1)
-            
+
             # for efficient coin tossing down the road
             if self.limit is not None and numcols > 2:
                 rnds = np.random.random_sample(willcheck)
@@ -322,21 +359,21 @@ class Locator:
                             if self.satisfies(newgroup):
                                 passed += 1
                                 ret.append(newgroup)
-                
+
                 progress(cur,willcheck,50,"skipped:{0:.1f}K passed: {1:d}".format(skipped/1000, passed))
             if len(ret) > 0:
                 print()
                 self.cache.insert(numcols,ret)
         return ret
 
-       
+
     def locate_all_columns(self):
         for i in reversed(range(1,len(binarized.columns)+1)):
             if len(self.locate_columns(i)) == 0:
                 break
         print()
         return self.cache
-            
+
     def main(self,filename=None):
         global binarized
         binarized = rebinarize()
@@ -344,11 +381,11 @@ class Locator:
         asessed = set()
         qs = dict()
         savefile = os.path.join("feature-sets","colgroups-{:d}".format(self.minrows))
-        if self.include is not None: 
+        if self.include is not None:
             inc = self.include if isinstance(self.include,list) else [self.include]
-            if verify_areas(inc): 
+            if verify_areas(inc):
                 binarized = binarized[[c for c in binarized.columns if feature2area[c] in inc]]
-            elif verify_features(inc): 
+            elif verify_features(inc):
                 binarized = binarized[inc]
             else:
                 print("include/exclude must be a WALS area name (lowercase,underscored) or a feature (just the code e.g 1A) or a list of such strings")
@@ -371,7 +408,7 @@ class Locator:
                 progress(j,len(icols),min(len(icols),50),"flagged:{:d}".format(len(flagged)))
                 groupkey = "".join(sorted(cols))
                 if groupkey not in asessed:
-                    group = ColGroup(cols,allow_empty=self.allow_empty)
+                    group = ColGroup(cols,allow_empty=self.allow_empty,fmode=self.fmode)
                     group.determine_spectral_data()
                     qind = group.quality_index
                     k = str(i+1)+'-long'
@@ -413,7 +450,10 @@ class Locator:
 class ColGroup:
     csv_dir = 'chunked-feature-sets'
     colors = ['r','g','b','c','k','y']
-    def __init__(self,cols,allow_empty=0):
+    def __init__(self,cols,allow_empty=0,fmode='true'):
+        self._mode = 'pca'
+        self._fmode = fmode
+        self.original_fmode = fmode
         self.cols = cols
         self.allow_empty = allow_empty
         self.colnames = [code2feature[c] for c in cols]
@@ -423,7 +463,6 @@ class ColGroup:
         self._silhouettes = dict()
         self.mca = None
         self.pca = None
-        self._mode = 'pca'
         self.families = nltk.FreqDist(self.get_table()['family'])
         consistent = sorted(self.families.most_common(),key=lambda p: p[0])
         consistent.sort(key = lambda p: p[1],reverse=True)
@@ -436,50 +475,65 @@ class ColGroup:
         self.current_axis = None
         self.categories = None
         self.bogus_seed = int("".join([c for c in "".join(self.cols) if c.isdigit()])) % (2**32 - 1)
-    
-    def require_pc(fn):
-        def wrap(self,*args,**kwargs):
-            if self.mode == 'mca':
-                if not isinstance(self.mca,Exception):
-                    if self.mca is None:
-                        try:
-                            self.mca = prince.MCA(self.get_table()[self.cols],n_components=-1)
-                            self.categories = self.mca.P.columns
-                        except Exception as e:
-                            self.mca = e
-                            print(str(e))
-                            return None
-            elif not isinstance(self.pca,Exception):
-                if self.pca is None:
+
+    def set_spectral_core(self,force_new=False):
+        if self.mode == 'mca':
+            if not isinstance(self.mca,Exception):
+                if (self.mca is None) or force_new:
                     try:
-                        d = pd.get_dummies(self.get_table()[self.cols])
-                        U,s,V = fbpca.pca(d,d.shape[1],raw=False)
-                        self.pca = np.square(s),V
-                        self.categories = d.columns
+                        self.mca = prince.MCA(self.get_table()[self.cols],n_components=-1)
+                        self.categories = self.mca.P.columns
                     except Exception as e:
-                        self.pca = e
+                        self.mca = e
                         print(str(e))
                         return None
+        elif not isinstance(self.pca,Exception):
+            if (self.pca is None) or force_new:
+                try:
+                    d = pd.get_dummies(self.get_table()[self.cols])
+                    U,s,V = fbpca.pca(d,d.shape[1],raw=False)
+                    self.pca = np.square(s),V
+                    self.categories = d.columns
+                except Exception as e:
+                    self.pca = e
+                    print(str(e))
+                    return None
+
+    def require_pc(fn):
+        def wrap(self,*args,**kwargs):
+            self.set_spectral_core()
             return fn(self,*args,**kwargs)
         return wrap
 
     @property
     def mode(self):
         return self._mode
-    
+
     @mode.setter
     def mode(self,mode):
         self._mode = mode
         self.determine_spectral_data()
-    
+
     @property
     def silhouettes(self):
         if self.mode not in self._silhouettes:
             self._silhouettes[self.mode] = pd.DataFrame(columns=np.arange(len(self.categories)+2))
         return self._silhouettes[self.mode]
-    
 
-    #legacy, if we gauge importance by bare pca on dummies, let the index be so too 
+    @property
+    def fmode(self):
+       return self._fmode
+
+    @fmode.setter
+    def fmode(self,features_mode):
+        self._fmode = features_mode
+        if features_mode == 'bogus':
+            global bogwals
+            if bogwals.empty:
+                bogwals = bogify_wals()
+        self.set_spectral_core(True)
+
+    #legacy, if we gauge importance by bare pca on dummies, let the index be so too
     def mca_asess(self):
         df = self.get_table()[self.cols]
         numvars = self.numcols
@@ -498,9 +552,9 @@ class ColGroup:
             indicator = numcats*y[0]/total_inertia
             return indicator,y[0]/total_inertia,y[1]/total_inertia
         except Exception as e:
-            print(str(e))        
+            print(str(e))
             return (None,None,None)
-    
+
     def phonology_subareas(self):
         phon = dict()
         for sub,feats in phonsubs.items():
@@ -517,7 +571,7 @@ class ColGroup:
             if len(feats) > submax:
                 submax = len(feats)
         return submax/self.numcols,subcount
-    
+
     @require_pc
     def asess(self):
         if self.mode == 'mca':
@@ -527,7 +581,7 @@ class ColGroup:
             s,V = self.pca
             tot = sum(s)
             return  V.shape[0] * s[0] / tot, s[0]/tot, s[1]/tot
-    
+
     def determine_spectral_data(self):
         asessment = self.asess()
         self.quality_index = asessment[0]
@@ -536,10 +590,13 @@ class ColGroup:
 
     def fields_spread(self):
         return self.fields.most_common(1)[0][1]/float(self.fields.N())
-    
+
     def get_table(self):
-        return chunk_wals(self.cols,False,self.allow_empty)
-    
+        table =  chunk_wals(self.cols,False,self.allow_empty)
+        if self.fmode == 'bogus':
+            table[self.cols] = bogwals[self.cols]
+        return table
+
     def genus_separation(self,target_genuses):
         df = self.get_table()
         labels = df['genus'][df['genus'].isin(target_genuses)]
@@ -547,7 +604,7 @@ class ColGroup:
         genuses = nltk.FreqDist(df['genus'])
         #self.target_genuses_counts = [(g,genuses[g]) for g in target_genuses]
         return self.best_silhouette('genus')[0]
-    
+
     def best_silhouette(self,kind,n_clusts=None):
         k = kind
         if  n_clusts is not None:
@@ -565,12 +622,12 @@ class ColGroup:
         return sils.max(),sils.argmax() - 1
 
     def gen_separation(self,n_clusts=2):
-        df = self.get_table()         
+        df = self.get_table()
         topfams = [fam[0] for fam in self.consistent_families[:n_clusts]]
         labels = df['family'][df['family'].isin(topfams)]
         self.silhouettes.loc['genetic-'+str(n_clusts)] = self.compute_silhouettes(labels)
         return self.best_silhouette('genetic',n_clusts)[0]
-    
+
     def plot_silhouettes(self,kind='genetic',clusts=2):
         thresh = 0.5
         sils = self.silhouettes.loc[kind+'-'+str(clusts)].values
@@ -579,17 +636,17 @@ class ColGroup:
         plt.ylabel('average silhouette coefficient')
         plt.xlabel('dimensions used')
         x = np.arange(-1,len(sils) - 1)
-        
+
         plt.scatter(x[0],sils[0],color='g',label='without MCA (Eucledian)')
         plt.scatter(x[1],sils[1],color='r',label='without MCA (Hamming)')
-        
+
         plt.plot(x[2:],sils[2:],label='by MCA projection')
         plt.xticks(np.arange(0,maxdim))
         plt.grid()
         plt.vlines([sd],ymin=sils.min(),ymax=sils.max(),linestyles="dashed",label="{:.1f} of the variance explained".format(thresh))
         plt.legend()
         plt.show()
-    
+
     def loose_ratio_column(self,columns=['Name','genus','family']):
         df = self.get_table()
         if 'verb-noun-ratio' in df.columns:
@@ -611,7 +668,7 @@ class ColGroup:
         df.insert(0,'verb-noun-ratio',pd.Series(ratios,index=df.index))
         self.known_vnratios = count
         return df
-    
+
     def add_ratio_column(self):
         df = self.get_table()
         if 'verb-noun-ratio' in df.columns:
@@ -632,7 +689,7 @@ class ColGroup:
         df.insert(0,'verb-noun-ratio',pd.Series(ratios,index=df.index))
         self.known_vnratios = count
         return df
-    
+
     @require_pc
     def compute_silhouettes(self,labels):
         silhouettes = list()
@@ -650,7 +707,7 @@ class ColGroup:
             filtered = self.projections(labels.index)[np.arange(numdims)]
             silhouettes.append(silsc(filtered,labels))
         return silhouettes
-    
+
     @require_pc
     def projections(self,indices):
         if self.mode == 'mca':
@@ -658,8 +715,8 @@ class ColGroup:
         else:
             V = self.pca[1]
             actdum = pd.get_dummies(self.get_table()[self.cols])
-            return actdum.loc[indices].dot(V.T) 
-    
+            return actdum.loc[indices].dot(V.T)
+
     def bogus_labels(self,n_clusts):
         fams = [f for f,c in self.consistent_families[:n_clusts]]
         df = self.get_table()
@@ -676,7 +733,7 @@ class ColGroup:
     def bogus_separation(self,n_clusts=2):
         self.silhouettes.loc['bogus-'+str(n_clusts)] = self.compute_silhouettes(self.bogus_labels(n_clusts))
         return self.best_silhouette('bogus',n_clusts)[0]
-    
+
     def ratio_separation(self):
         df = self.add_ratio_column()
         labels = df.loc[df['verb-noun-ratio'] != 'unknown']['verb-noun-ratio']
@@ -698,7 +755,7 @@ class ColGroup:
                 starts.append(active.loc[choice].values)
             filtered = np.array([[pd.get_dummies(active).loc[i].values] for i in labels.index])
             print(filtered)
-            pred,means = kmeans(filtered,n_clusts,start_clusters=np.array(starts),distance='L1') 
+            pred,means = kmeans(filtered,n_clusts,start_clusters=np.array(starts),distance='L1')
             pred = pred.flatten()
             print(pred)
         else:
@@ -710,7 +767,7 @@ class ColGroup:
             addcolumn.append(next(prediter) if i in labels.index else 'other')
         df.insert(0,"kmpredict-{}-{}".format(n_clusts,dims),pd.Series(addcolumn,index=df.index))
         return df
-    
+
     @require_pc
     def significant_dimensions(self,thresh=0.6):
         if self.mode == 'mca':
@@ -727,7 +784,7 @@ class ColGroup:
                 if cm >= thresh:
                     return i + 1
                 i += 1
-            
+
 
     def plot_multifam(self,mincount='auto'):
         self.current_axis = None
@@ -760,7 +817,7 @@ class ColGroup:
             for a in fax[i+1:]:
                 a.set_visible(False)
         plt.show()
-    
+
     def pcplot(self,points,labels=None,annotate=True):
         multi = False
         points = -1 * points
@@ -813,34 +870,34 @@ class ColGroup:
                         ax.text(ofx,ofy,dat.loc[j,'wals_code'],color=colors[i])
                         already.update({(r[0],r[1]) : 1})
 
-            if not multi: 
+            if not multi:
                 ax.legend(handles,ulabels)
         else:
             x = points.values[:,0]
             y = points.values[:,1]
             ax.scatter(x,y,s=50,marker='o',c=colors[0])
-        
+
         # chart grid and main axes
-        ax.grid(True,which='both') 
+        ax.grid(True,which='both')
         ax.spines['bottom'].set_position('zero')
         ax.spines['right'].set_color('none')
         ax.spines['top'].set_color('none')
         ax.spines['left'].set_position('zero')
-    
+
     def comps_line(self):
         self.determine_spectral_data()
         return "comp1: {0:.2f}%  comp2: {1:.2f}%".format(100*self.dim1,100*self.dim2)
-    
+
     @require_pc
     def plot_bogus(self,n_clusts=2):
         suptit = "Coloring Languages by Bogus Properties ({})".format(self.mode)
-        labels = self.bogus_labels()
+        labels = self.bogus_labels(n_clusts)
         points = self.projections(labels.index)
         sil = self.best_silhouette('bogus',n_clusts)[0]
         self.pcplot(points,labels)
         plt.suptitle("{}\n{}  silhouette: {:.2f}".format(suptit,self.comps_line(),sil))
         plt.show()
-    
+
     @require_pc
     def plot_families(self,fams=None,multi=False):
         if not multi:
@@ -858,19 +915,19 @@ class ColGroup:
             plt.show()
         else:
             return sil
-    
+
     @require_pc
     def loadings(self):
         if self.mode == 'pca':
             V = self.pca[1]
             #comps = ['comp.'+str(i) for i in np.arange(V.shape[0])]
-            return  pd.DataFrame(V.T,index=self.categories,columns=comps)
+            return  pd.DataFrame(V.T,index=self.categories) #,columns=comps)
         elif self.mode == 'mca':
             return self.mca.column_component_contributions*100
-    
+
     def weights(self,comps=5):
         """
-        :comps: number of PCs for which to compute the features' weights 
+        :comps: number of PCs for which to compute the features' weights
         """
         loadings = self.loadings()
         if loadings is None:
@@ -902,13 +959,13 @@ PC2: {5:.0%}
 fields: {6:s}
 features:
 {7:s}
-family1: {8:d} ({9:s}) 
-family2: {10:d} ({11:s}) 
+family1: {8:d} ({9:s})
+family2: {10:d} ({11:s})
 """.format(
-            self.numcols, 
-            self.numrows, 
+            self.numcols,
+            self.numrows,
             self.mode.upper(),
-            self.quality_index, 
+            self.quality_index,
             self.dim1,
             self.dim2,
             self.fields.pformat().replace("FreqDist({","").strip("})"),
@@ -920,26 +977,27 @@ family2: {10:d} ({11:s})
         )
         if  'genetic' in self.silhouettes.index:
             ret += """
-genetic separation: {0:.2f} ({1:d} PCs)""".format(self.best_silhouette('genetic',2))
-    
+genetic separation: {0:.2f} ({1:d} PCs)""".format(*self.best_silhouette('genetic',2))
+
         if 'ratio' in self.silhouettes.index:
             ret += """
-known verb noun ratios: {0:d} 
+known verb noun ratios: {0:d}
 ratio separation: {1:.2f} ({2:d} PCs)""".format(
             self.known_vnratios,
-            self.best_silhouette('ratio')
+            self.best_silhouette('ratio')[0],
+            self.best_silhouette('ratio')[1]
         )
         if 'bogus' in self.silhouettes.index:
             ret += """
-bogus separation: {1:.2f} ({2:d} PCs)""".format(self.best_silhouette('bogus',2))
+bogus separation: {0:.2f} ({1:d} PCs)""".format(*self.best_silhouette('bogus',2))
         return ret
 
 if __name__ == '__main__':
     opts,args = parser.parse_args()
     minrows  = int(args[0])
     loc = Locator(minrows,**opts.__dict__)
-    loc.main()
-       
+    loc.main(filename='discard')
+
 #if __name__ == '__main__':
 #    opts = {
 #        'include' : areas['phonology'],
