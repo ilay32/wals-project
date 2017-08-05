@@ -530,6 +530,7 @@ class ColGroup:
         if features_mode == 'bogus':
             global bogwals
             if bogwals.empty:
+                print('bogifying wals')
                 bogwals = bogify_wals()
         self.set_spectral_core(True)
 
@@ -836,6 +837,7 @@ class ColGroup:
 
         ax.set_xlim([points.values[:,0].min() - 1,points.values[:,0].max() + 1])
         ax.set_ylim([points.values[:,1].min() - 1,points.values[:,1].max() + 1])
+        self.plot_grid()
 
         # usually the case
         if labels is not None:
@@ -878,11 +880,11 @@ class ColGroup:
             ax.scatter(x,y,s=50,marker='o',c=colors[0])
 
         # chart grid and main axes
-        ax.grid(True,which='both')
-        ax.spines['bottom'].set_position('zero')
-        ax.spines['right'].set_color('none')
-        ax.spines['top'].set_color('none')
-        ax.spines['left'].set_position('zero')
+        #ax.grid(True,which='both')
+        #ax.spines['bottom'].set_position('zero')
+        #ax.spines['right'].set_color('none')
+        #ax.spines['top'].set_color('none')
+        #ax.spines['left'].set_position('zero')
 
     def comps_line(self):
         self.determine_spectral_data()
@@ -897,6 +899,48 @@ class ColGroup:
         self.pcplot(points,labels)
         plt.suptitle("{}\n{}  silhouette: {:.2f}".format(suptit,self.comps_line(),sil))
         plt.show()
+    
+    @require_pc
+    def plot_vars(self):
+        dat = self.get_table()
+        cvals = self.get_feature_values()
+        fig,ax = plt.subplots(figsize=(15,15))
+        self.current_axis = ax
+        centers = list()
+        for c,vals in cvals.items():
+            for v in vals:
+                members =  dat[dat[c] == v]
+                members = -1 * members
+                center = self.projections(members.index).mean()[0:2].values
+                label = "{:s} {:d}%".format(v,int(100*len(members)/len(dat)))
+                centers.append((center,label)) 
+        centers.sort(key=lambda x: x[0][0])
+        ax.set_xlim(centers[0][0][0] - 1,centers[-1][0][0] + 1)
+        centers.sort(key=lambda x: x[0][1])
+        ax.set_ylim([centers[0][0][1] - 1,centers[-1][0][1] + 1])
+        self.plot_grid()
+        for center,label in centers:
+            x,y  = center
+            ax.scatter(x,y, s=50, marker='s',c='black')
+            ax.text(x + 0.02,y - 0.02,label,color='black')
+        ax.tick_params(
+            axis='both',
+            which='both',
+            labelbottom='off',
+            labelleft='off'
+        )
+        plt.show()
+    
+    def plot_grid(self):
+        ax = self.current_axis
+        # chart grid and main axes
+        ax.grid(True,which='both')
+        ax.spines['bottom'].set_position('zero')
+        ax.spines['right'].set_color('none')
+        ax.spines['top'].set_color('none')
+        ax.spines['left'].set_position('zero')
+
+
 
     @require_pc
     def plot_families(self,fams=None,multi=False):
@@ -948,6 +992,13 @@ class ColGroup:
             df = pd.concat([supp,active],axis=1)
         df.to_csv(os.path.join(ColGroup.csv_dir,filename),ignore_index=True)
         return df
+    
+    def get_feature_values(self):
+        dat = self.get_table()[self.cols]
+        vals = dict()
+        for c in self.cols:
+            vals[c] = list(dat[c].unique())
+        return vals
 
     def __str__(self) :
         top2 = self.consistent_families[:2]
