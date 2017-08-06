@@ -910,8 +910,8 @@ class ColGroup:
         for c,vals in cvals.items():
             for v in vals:
                 members =  dat[dat[c] == v]
-                members = -1 * members
-                center = self.projections(members.index).mean()[0:2].values
+                members =  members
+                center = -1 * self.projections(members.index).mean()[0:2].values
                 label = "{:s} {:d}%".format(v,int(100*len(members)/len(dat)))
                 centers.append((center,label)) 
         centers.sort(key=lambda x: x[0][0])
@@ -922,7 +922,7 @@ class ColGroup:
         for center,label in centers:
             x,y  = center
             ax.scatter(x,y, s=50, marker='s',c='black')
-            ax.text(x + 0.02,y - 0.02,label,color='black')
+            ax.text(x + 0.02,y - 0.01,label,color='black')
         ax.tick_params(
             axis='both',
             which='both',
