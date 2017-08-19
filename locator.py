@@ -133,6 +133,11 @@ for feat,val in zapvals:
 
 # helpers #
 #---------#
+def dimrange(d):
+    if d > 0:
+        return np.arange(d)
+    return 0
+
 def phonsub(f):
     if f == '3A':
         return 'consontants and vowels'
@@ -515,6 +520,7 @@ class ColGroup:
         self.determine_spectral_data()
 
     @property
+    @require_pc
     def silhouettes(self):
         if self.mode not in self._silhouettes:
             self._silhouettes[self.mode] = pd.DataFrame(columns=np.arange(len(self.categories)+2))
@@ -600,11 +606,21 @@ class ColGroup:
 
     def genus_separation(self,target_genuses):
         df = self.get_table()
-        labels = df['genus'][df['genus'].isin(target_genuses)]
+        labels = df.loc[df['genus'].isin(target_genuses)]['genus']
         self.silhouettes.loc['genus'] = self.compute_silhouettes(labels)
         genuses = nltk.FreqDist(df['genus'])
         #self.target_genuses_counts = [(g,genuses[g]) for g in target_genuses]
         return self.best_silhouette('genus')[0]
+    
+    def plot_genuses(self,target_genuses):
+        df = self.get_table()
+        labels = df.loc[df['genus'].isin(target_genuses)]['genus']
+        suptit = "{} ({})".format(" ".join(target_genuses),self.mode.upper())
+        points = self.projections(df['genus'].isin(target_genuses))
+        self.pcplot(points,labels)
+        sil = silsc(points.values[:,:2],labels)
+        plt.suptitle("{}\n{}  silhouette: {:.2f}".format(suptit,self.comps_line(),sil))
+        plt.show()
 
     def best_silhouette(self,kind,n_clusts=None):
         k = kind
@@ -744,7 +760,7 @@ class ColGroup:
     def add_genetic_data(self,n_clusts=2,raw=False):
         self.gen_separation(n_clusts)
         df = self.get_table()
-        dims = self.best_silhouette('genetic',n_clusts)[0]
+        dims = self.best_silhouette('genetic',n_clusts)[1]
         topfams = [fam[0] for fam in self.consistent_families[:n_clusts]]
         labels = df['family'][df['family'].isin(topfams)]
         if raw:
@@ -760,7 +776,7 @@ class ColGroup:
             pred = pred.flatten()
             print(pred)
         else:
-            filtered = self.projections(labels.index)[np.arange(dims)]
+            filtered = self.projections(labels.index)[dimrange(dims)]
             pred = km(n_clusters=n_clusts,n_init=15).fit_predict(filtered)
         addcolumn = list()
         prediter = iter(pred)
@@ -768,6 +784,25 @@ class ColGroup:
             addcolumn.append(next(prediter) if i in labels.index else 'other')
         df.insert(0,"kmpredict-{}-{}".format(n_clusts,dims),pd.Series(addcolumn,index=df.index))
         return df
+    
+    @require_pc
+    def predict(self,lang,prop,clusters):
+        df = self.get_table()
+        sil = self.best_silhouette(prop,len(clusters))
+        if sil is None:
+            return None 
+        labels = df.loc[df[prop].isin(clusters)]
+        langid = labels[labels['wals_code'] == lang].index[0]
+        lang_natural_index = labels.index.get_loc(langid)
+        filtered = self.projections(labels.index)[dimrange(sil[1])]
+        try:
+            preds =  km(n_clusters=len(clusters),n_init=15).fit_predict(filtered)
+            paired = list(zip(labels[prop],preds))
+            return paired[lang_natural_index][0] 
+        except Exception as e:
+            print(sil)
+            return 'yosi'
+
 
     @require_pc
     def significant_dimensions(self,thresh=0.6):
