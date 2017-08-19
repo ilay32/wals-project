@@ -2,7 +2,9 @@ import pandas as pd
 import numpy as np
 from sklearn.cluster import KMeans as km
 from sklearn.metrics import silhouette_score as silsc
-from scipy.spatial.distance import hamming
+from scipy.spatial.distance import hamming,euclidean
+from scipy.linalg import norm
+from scipy.stats import entropy
 import copy,fbpca,yaml,hashlib,pickle,nltk,sys,nltk,optparse,os,prince
 from progress import progress
 from matplotlib import pyplot as plt
@@ -454,7 +456,22 @@ class Locator:
 
 class ColGroup:
     csv_dir = 'chunked-feature-sets'
-    colors = ['r','g','b','c','k','y']
+    #colors = ['r','g','b','c','k','y']
+    colors = [
+        'darkviolet',
+        'seagreen',
+        'lightcoral',
+        'dodgerblue',
+        'firebrick',
+        'gold',
+        'charteuse',
+        'orange',
+        'orchid',
+        'sienna',
+        'blue',
+        'gray',
+        'pink'
+    ]
     def __init__(self,cols,allow_empty=0,fmode='true'):
         self._mode = 'pca'
         self._fmode = fmode
@@ -847,6 +864,7 @@ class ColGroup:
             sil = self.plot_families(fams=pair,multi=True)
             axis.set_title("{}/{} silhouette: {:.2f}".format(*pair,sil),fontsize=10)
 
+
         plt.tight_layout(rect=[0.01, 0.01, 0.99, 0.9])
         plt.suptitle("Family Pairs with More than {:d} Languages ({:s})\n{:s}".format(mincount,self.mode.upper(),self.comps_line()))
         if i < len(fax):
@@ -936,18 +954,21 @@ class ColGroup:
         plt.show()
     
     @require_pc
-    def plot_vars(self):
+    def plot_vars(self,feats=None):
+        if feats is None:
+            feats = self.cols
         dat = self.get_table()
         cvals = self.get_feature_values()
         fig,ax = plt.subplots(figsize=(15,15))
         self.current_axis = ax
         centers = list()
-        for c,vals in cvals.items():
+        for c in feats:
+            vals = cvals[c]
             for v in vals:
                 members =  dat[dat[c] == v]
                 members =  members
                 center = -1 * self.projections(members.index).mean()[0:2].values
-                label = "{:s} {:d}%".format(v,int(100*len(members)/len(dat)))
+                label = "{:s}: {:s} {:d}%".format(c,v,int(100*len(members)/len(dat)))
                 centers.append((center,label)) 
         centers.sort(key=lambda x: x[0][0])
         ax.set_xlim(centers[0][0][0] - 1,centers[-1][0][0] + 1)
@@ -957,7 +978,7 @@ class ColGroup:
         for center,label in centers:
             x,y  = center
             ax.scatter(x,y, s=50, marker='s',c='black')
-            ax.text(x + 0.02,y - 0.01,label,color='black')
+            ax.text(x + 0.03,y,label,color='black')
         ax.tick_params(
             axis='both',
             which='both',
@@ -965,6 +986,7 @@ class ColGroup:
             labelleft='off'
         )
         plt.show()
+        self.current_axis = None
     
     def plot_grid(self):
         ax = self.current_axis
@@ -984,6 +1006,8 @@ class ColGroup:
         dat = self.get_table()
         if fams is None:
             fams = [f for f,c in self.consistent_families[:2]]
+        elif isinstance(fams,int):
+            fams = [f for f,c in self.consistent_families[:fams]]
         labels = dat.loc[dat['family'].isin(fams)]['family']
         suptit = "{} ({})".format(" ".join(fams),self.mode.upper())
         points = self.projections(dat['family'].isin(fams))
@@ -994,6 +1018,8 @@ class ColGroup:
             plt.show()
         else:
             return sil
+    
+
 
     @require_pc
     def loadings(self):
@@ -1002,7 +1028,7 @@ class ColGroup:
             #comps = ['comp.'+str(i) for i in np.arange(V.shape[0])]
             return  pd.DataFrame(V.T,index=self.categories) #,columns=comps)
         elif self.mode == 'mca':
-            return self.mca.column_component_contributions*100
+            return self.mca.column_component_contributions * 100
 
     def weights(self,comps=5):
         """
@@ -1016,7 +1042,16 @@ class ColGroup:
             entries = loadings.loc[loadings.index.str.startswith(c)]
             ret[c] = np.square(entries[np.arange(comps)]).sum(axis=0)
         return ret
-
+    
+    def silhouettes_repr(self): 
+        ret = ""
+        for silkind in self.silhouettes.index:
+            sils =  self.silhouettes.loc[silkind]
+            ret += "{0:s}: {1:.2f} ({2:d} PCs)\n\r".format(silkind,sils.max(),np.argmax(sils) - 1)
+        if ret != "":
+            ret = "silhouettes:\n\r"+ret
+        return ret 
+    
     def to_csv(self,binary=False,allow_empty=0,filename=None):
         df = self.get_table()
         if filename is None:
@@ -1034,8 +1069,10 @@ class ColGroup:
         for c in self.cols:
             vals[c] = list(dat[c].unique())
         return vals
-
+    
     def __str__(self) :
+        if self.quality_index is None:
+            self.determine_spectral_data()
         top2 = self.consistent_families[:2]
         ret =  """{0:d} long group covering {1:d} languages
 in mode {2:s}:
@@ -1047,6 +1084,7 @@ features:
 {7:s}
 family1: {8:d} ({9:s})
 family2: {10:d} ({11:s})
+{12:s}
 """.format(
             self.numcols,
             self.numrows,
@@ -1059,36 +1097,92 @@ family2: {10:d} ({11:s})
             top2[0][1],
             top2[0][0],
             top2[1][1],
-            top2[1][0]
+            top2[1][0],
+            self.silhouettes_repr()
         )
-        if  'genetic' in self.silhouettes.index:
-            ret += """
-genetic separation: {0:.2f} ({1:d} PCs)""".format(*self.best_silhouette('genetic',2))
-
-        if 'ratio' in self.silhouettes.index:
-            ret += """
-known verb noun ratios: {0:d}
-ratio separation: {1:.2f} ({2:d} PCs)""".format(
-            self.known_vnratios,
-            self.best_silhouette('ratio')[0],
-            self.best_silhouette('ratio')[1]
-        )
-        if 'bogus' in self.silhouettes.index:
-            ret += """
-bogus separation: {0:.2f} ({1:d} PCs)""".format(*self.best_silhouette('bogus',2))
         return ret
 
-if __name__ == '__main__':
-    opts,args = parser.parse_args()
-    minrows  = int(args[0])
-    loc = Locator(minrows,**opts.__dict__)
-    loc.main(filename='discard')
+class SingleCol(ColGroup):
+    sqrt2 = np.sqrt(2)
+    def __init__(self,wals_feature=None,mincount=10,colgroup=None):
+        if wals_feature is None and colgroup is None:
+            print("must provide a feature somehow")
+            return
+        if not isinstance(colgroup,ColGroup):
+            super(SingleCol,self).__init__([wals_feature])
+            self.feat = wals_feature
+        else:
+            if len(colgroup.cols) > 1:
+                print("construct from ColGroup requires a single feature group")
+                return
+            self.__dict__ = colgroup.__dict__
+            self.feat = colgroup.cols[0]
+        if self.families.B() < 2:
+            self.mincount = self.families.most_common(1)[0][1]
+        else:
+            self.mincount = min(mincount,self.consistent_families[1][1])
+        self.vals = [ v for v in wals[self.feat].unique() if v != ""]
+
+    def fdist(self,family):
+        f = self.feat
+        rel = wals.loc[(wals['family'] == family) & (wals[f] != "")][f]
+        dist = nltk.FreqDist(rel)
+        for val in self.vals:
+            if val not in dist:
+                dist.update({val:0})
+        return dist
+
+    def fdists(self):
+        ret = nltk.ConditionalFreqDist()
+        for fam,count in self.families.most_common():
+            if count > self.mincount:
+                ret[fam] = self.fdist(fam)
+        return ret
+
+    def plot_multifam_bars(self):
+        dists = self.fdists()
+        df = pd.DataFrame(index=self.vals,columns=dists.conditions())
+        for val in df.index:
+            for l in df.columns:
+                df.loc[val][l] = dists[l][val]
+        df.sort_index(axis=0,inplace=True)
+        fig,ax = plt.subplots()
+        self.current_axis = ax
+        ax.set_title("Distribution of {:s}\non Families with More Than {:d} Languages".format(code2feature[self.feat],self.mincount)) 
+        ax.set_xlabel("Feature Values")
+        ax.set_ylabel("Number of Languages")
+        df.plot.bar(ax=ax,figsize=(15,8))
+        plt.show()
+
+    def measures(self,fam1,fam2):
+        pd = nltk.LidstoneProbDist(self.fdist(fam1),0.5)
+        qd = nltk.LidstoneProbDist(self.fdist(fam2),0.5)
+        #p = [pd.freq(v) for v in self.vals]
+        #q = [qd.freq(v) for v in self.vals]
+        p = [pd.prob(v) for v in self.vals]
+        q = [qd.prob(v) for v in self.vals]
+
+        return {
+            'symKL':min((entropy(p,q) + entropy(q,p))/2,10), 
+            'euc' : euclidean(q,p), 
+            'hellinger' : norm(np.sqrt(p) - np.sqrt(q)) / SingleCol.sqrt2
+        }
+
+    def KLs(self):
+        fams = [f for f,c in self.families.most_common() if c >= self.mincount]
+        ret = list()
+        ind = list()
+        for i,f1 in enumerate(fams[0:-1]):
+            for j,f2 in enumerate(fams[i+1:]):
+                ret.append(self.measures(f1,f2))
+                ind.append((f1,f2))
+        return pd.DataFrame(ret,index=pd.MultiIndex.from_tuples(tuples=ind,names=['fam1','fam2']))
+        
 
 #if __name__ == '__main__':
-#    opts = {
-#        'include' : areas['phonology'],
-#        'cutoff' : 5
-#    }
-#    loc = Locator(200,**opts)
-#    loc.main('discard')
-#
+#    opts,args = parser.parse_args()
+#    minrows  = int(args[0])
+#    loc = Locator(minrows,**opts.__dict__)
+#    loc.main(filename='discard')
+
+
