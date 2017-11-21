@@ -135,6 +135,9 @@ for feat,val in zapvals:
 
 # helpers #
 #---------#
+def unique_pairs(l,withsyms=False):
+    return [(l[i],l[j]) for i in range(len(l) - 1) for j in range(i+int(not withsyms),len(l))]
+
 def dimrange(d):
     if d > 0:
         return np.arange(d)
@@ -741,7 +744,29 @@ class ColGroup:
             filtered = self.projections(labels.index)[np.arange(numdims)]
             silhouettes.append(silsc(filtered,labels))
         return silhouettes
-
+    
+    def compute_raw_silhouettes(self,mincount='auto'):
+        dat = self.get_table()
+        mc = self.families.most_common()
+        if mincount == 'auto':
+            mincount = mc[4][1]
+        fams = [f for f,c in mc if c >= mincount]
+        if len(fams) < 2:
+            print("not enough families with",mincount,"languages")
+            return
+        ret = pd.DataFrame(index=pd.MultiIndex.from_tuples(unique_pairs(self.cols,True)),columns=pd.MultiIndex.from_tuples(unique_pairs(fams)))
+        for c1,c2 in ret.index:
+            d = pd.get_dummies(self.get_table()[list(set([c1,c2]))])
+            for fam1,fam2 in ret.columns:
+                if fam1 == fam2:
+                    sil = 1
+                else:
+                    labels = dat.loc[dat['family'].isin([fam1,fam2])]['family']
+                    filtered = d.loc[labels.index]
+                    sil = silsc(filtered,labels,hamming)
+                ret.loc[c1,c2][fam1,fam2] = sil
+        return ret
+            
     @require_pc
     def projections(self,indices):
         if self.mode == 'mca':
@@ -848,7 +873,7 @@ class ColGroup:
         if len(fams) < 2:
             print("not enough families with",mincount,"languages")
             return
-        fampairs = [(fams[i],fams[j]) for i in range(len(fams) - 1) for j in range(i+1,len(fams))]
+        fampairs = unique_pairs(fams) 
         numfigs = len(fampairs)
         if numfigs > 3:
             nc = 3
@@ -858,15 +883,17 @@ class ColGroup:
             nr = 1
         fig, axes = plt.subplots(nrows=nr, ncols=nc,figsize=(12,12))
         fax = axes.flatten()
+        sils = list()
         for i,pair in enumerate(fampairs):
             axis = fax[i]
             self.current_axis = axis
             sil = self.plot_families(fams=pair,multi=True)
+            sils.append(sil)
             axis.set_title("{}/{} silhouette: {:.2f}".format(*pair,sil),fontsize=10)
 
 
         plt.tight_layout(rect=[0.01, 0.01, 0.99, 0.9])
-        plt.suptitle("Family Pairs with More than {:d} Languages ({:s})\n{:s}".format(mincount,self.mode.upper(),self.comps_line()))
+        plt.suptitle("Family Pairs with More than {:d} Languages ({:s})\n{:s} Average silhouette score:{:.2f}".format(mincount,self.mode.upper(),self.comps_line(),np.mean(sils)))
         if i < len(fax):
             for a in fax[i+1:]:
                 a.set_visible(False)
