@@ -475,7 +475,7 @@ class ColGroup:
         'gray',
         'pink'
     ]
-    def __init__(self,cols,allow_empty=0,fmode='true'):
+    def __init__(self,cols,allow_empty=0,fmode='true',fams_min=None):
         self._mode = 'pca'
         self._fmode = fmode
         self.original_fmode = fmode
@@ -492,6 +492,7 @@ class ColGroup:
         consistent = sorted(self.families.most_common(),key=lambda p: p[0])
         consistent.sort(key = lambda p: p[1],reverse=True)
         self.consistent_families = consistent
+        self.minimal_family_strength = consistent[min(4,len([p for p in consistent if p[1] > 1]) - 1)][1]
         self.quality_index = None
         self.dim1 = None
         self.dim2 = None
@@ -500,6 +501,8 @@ class ColGroup:
         self.current_axis = None
         self.categories = None
         self.bogus_seed = int("".join([c for c in "".join(self.cols) if c.isdigit()])) % (2**32 - 1)
+        self.raw_silhouettes = None
+        self.paired_silhouettes = None
 
     def set_spectral_core(self,force_new=False):
         if self.mode == 'mca':
@@ -655,7 +658,7 @@ class ColGroup:
         if k not in self.silhouettes.index:
             print("must run the",kind,"method first")
             return None
-        sils = self.silhouettes.loc[k]
+        sils = self.silhouettes.loc[k][2:]
         return sils.max(),sils.argmax() - 1
 
     def gen_separation(self,n_clusts=2):
@@ -729,6 +732,8 @@ class ColGroup:
 
     @require_pc
     def compute_silhouettes(self,labels):
+        if len(self.consistent_families) < 2:
+            return None
         silhouettes = list()
         binact = pd.get_dummies(self.get_table()[self.cols])
         filtered = binact.loc[labels.index]
@@ -745,16 +750,20 @@ class ColGroup:
             silhouettes.append(silsc(filtered,labels))
         return silhouettes
     
-    def compute_raw_silhouettes(self,mincount='auto'):
-        dat = self.get_table()
-        mc = self.families.most_common()
+    def fampairs(self,mincount='auto'): 
         if mincount == 'auto':
-            mincount = mc[4][1]
-        fams = [f for f,c in mc if c >= mincount]
+            mincount = self.minimal_family_strength
+        fams = [f for f,c in self.consistent_families if c >= mincount]
         if len(fams) < 2:
             print("not enough families with",mincount,"languages")
             return
-        ret = pd.DataFrame(index=pd.MultiIndex.from_tuples(unique_pairs(self.cols,True)),columns=pd.MultiIndex.from_tuples(unique_pairs(fams)))
+        return unique_pairs(fams)
+
+    def compute_raw_silhouettes(self):
+        if self.raw_silhouettes is not None:
+            return self.raw_silhouettes
+        dat = self.get_table()
+        ret = pd.DataFrame(index=pd.MultiIndex.from_tuples(unique_pairs(self.cols,True)),columns=pd.MultiIndex.from_tuples(self.fampairs()))
         for c1,c2 in ret.index:
             d = pd.get_dummies(self.get_table()[list(set([c1,c2]))])
             for fam1,fam2 in ret.columns:
@@ -765,8 +774,9 @@ class ColGroup:
                     filtered = d.loc[labels.index]
                     sil = silsc(filtered,labels,hamming)
                 ret.loc[c1,c2][fam1,fam2] = sil
+        self.raw_silhouettes = ret
         return ret
-            
+    
     @require_pc
     def projections(self,indices):
         if self.mode == 'mca':
@@ -863,18 +873,13 @@ class ColGroup:
                     return i + 1
                 i += 1
 
-
     def plot_multifam(self,mincount='auto'):
-        self.current_axis = None
-        mc = self.families.most_common()
+        single = isinstance(self,SingleCol)
         if mincount == 'auto':
-            mincount = mc[4][1]
-        fams = [f for f,c in mc if c >= mincount]
-        if len(fams) < 2:
-            print("not enough families with",mincount,"languages")
-            return
-        fampairs = unique_pairs(fams) 
-        numfigs = len(fampairs)
+            mincount = self.minimal_family_strength
+        self.current_axis = None
+        pairs = self.fampairs()
+        numfigs = len(pairs)
         if numfigs > 3:
             nc = 3
             nr = int(np.ceil(numfigs/3))
@@ -883,15 +888,21 @@ class ColGroup:
             nr = 1
         fig, axes = plt.subplots(nrows=nr, ncols=nc,figsize=(12,12))
         fax = axes.flatten()
+        if not single:
+            rsils = self.compute_raw_silhouettes()
         sils = list()
-        for i,pair in enumerate(fampairs):
+        for i,pair in enumerate(pairs):
             axis = fax[i]
             self.current_axis = axis
             sil = self.plot_families(fams=pair,multi=True)
             sils.append(sil)
-            axis.set_title("{}/{} silhouette: {:.2f}".format(*pair,sil),fontsize=10)
-
-
+            title = "{:s}/{:s} silhouette: {:.2f}".format(*pair,sil)
+            if not single:
+                singlesils = rsils[pair[0],pair[1]].filter(items=[(c,c) for c in self.cols])
+                singlesline = " ".join(["{:s}:{:.2f}".format(c[0],s) for c,s in singlesils.items() if s > sil])
+                title += "\nbetter by single feature (hamming):\n{:s}"
+            axis.set_title(title,fontsize=10)
+        psils = self.pair_sils()
         plt.tight_layout(rect=[0.01, 0.01, 0.99, 0.9])
         plt.suptitle("Family Pairs with More than {:d} Languages ({:s})\n{:s} Average silhouette score:{:.2f}".format(mincount,self.mode.upper(),self.comps_line(),np.mean(sils)))
         if i < len(fax):
@@ -1025,7 +1036,28 @@ class ColGroup:
         ax.spines['left'].set_position('zero')
 
 
-
+    @require_pc
+    def pair_sils(self,pairs=None):
+        if len(self.consistent_families) < 2:
+            return None
+        if self.silhouettes.isnull().all().all():
+            return None
+        if self.paired_silhouettes is not None:
+            return self.paired_silhouettes
+        if pairs is None:
+            pairs = self.fampairs()
+        if pairs is None:
+            return None
+        dat = self.get_table()
+        dims = self.best_silhouette('genetic',2)[1]
+        ret = pd.Series('gen2sil',index=pd.MultiIndex.from_tuples(pairs))
+        for pair in pairs:
+            labels = dat.loc[dat['family'].isin(pair)]['family']
+            points = self.projections(dat['family'].isin(pair))
+            ret.loc[pair[0],pair[1]] = silsc(points.values[:,:dims],labels)
+        self.paired_silhouettes = ret
+        return ret
+            
     @require_pc
     def plot_families(self,fams=None,multi=False):
         if not multi:
