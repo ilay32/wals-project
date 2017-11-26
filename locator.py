@@ -668,22 +668,32 @@ class ColGroup:
         self.silhouettes.loc['genetic-'+str(n_clusts)] = self.compute_silhouettes(labels)
         return self.best_silhouette('genetic',n_clusts)[0]
 
-    def plot_silhouettes(self,kind='genetic',clusts=2):
+    def plot_silhouettes(self,kind='genetic',clusts=2,withsingles=False):
         thresh = 0.5
         sils = self.silhouettes.loc[kind+'-'+str(clusts)].values
         maxdim = len(sils) - 1
         sd = self.significant_dimensions(thresh)
-        plt.ylabel('average silhouette coefficient')
-        plt.xlabel('dimensions used')
+        fig,ax = plt.subplots(figsize=(14,12))
+        ax.set_ylabel('average silhouette coefficient')
+        ax.set_xlabel('dimensions used')
         x = np.arange(-1,len(sils) - 1)
 
-        plt.scatter(x[0],sils[0],color='g',label='without MCA (Eucledian)')
-        plt.scatter(x[1],sils[1],color='r',label='without MCA (Hamming)')
+        ax.scatter(x[0],sils[0],color='g',label='without MCA (Eucledian)')
+        ax.scatter(x[1],sils[1],color='r',label='without MCA (Hamming)')
 
-        plt.plot(x[2:],sils[2:],label='by MCA projection')
-        plt.xticks(np.arange(0,maxdim))
+        ax.plot(x[2:],sils[2:],label='by MCA projection')
+        ax.set_xticks(np.arange(0,maxdim))
         plt.grid()
-        plt.vlines([sd],ymin=sils.min(),ymax=sils.max(),linestyles="dashed",label="{:.1f} of the variance explained".format(thresh))
+        ax.vlines([sd],ymin=sils.min(),ymax=sils.max(),linestyles="dashed",label="{:.1f} of the variance explained".format(thresh))
+        
+        if withsingles and len(self.consistent_families) > 1:
+            singles = self.raw_silhouettes.filter(items=[(c,c) for c in self.cols],axis=0)
+            top2 = [f for f,c in self.consistent_families[:2]]
+            for i,r in singles.iterrows():
+                top2sil = r[top2[0],top2[1]]
+                if not pd.isnull(top2sil):
+                    ax.plot((x[0],x[-1]),(top2sil,top2sil),'-.',label='{} alone'.format(i[0]))
+        plt.suptitle('Silhouette Scores on Top {:d} Families'.format(clusts))
         plt.legend()
         plt.show()
 
