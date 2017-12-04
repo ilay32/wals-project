@@ -910,7 +910,7 @@ class ColGroup:
             if not single:
                 singlesils = rsils[pair[0],pair[1]].filter(items=[(c,c) for c in self.cols])
                 singlesline = " ".join(["{:s}:{:.2f}".format(c[0],s) for c,s in singlesils.items() if s > sil])
-                title += "\nbetter by single feature (hamming):\n{:s}"
+                title += "\nbetter by single feature (hamming):\n{:s}".format(singlesline)
             axis.set_title(title,fontsize=10)
         psils = self.pair_sils()
         plt.tight_layout(rect=[0.01, 0.01, 0.99, 0.9])
