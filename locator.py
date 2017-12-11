@@ -749,7 +749,9 @@ class ColGroup:
     def gen_separation(self,n_clusts=2,family=None):
         df = self.get_table()
         if family in df['family'].values:
-            labels = df['family'].apply(lambda f: f if f == family else 'other')
+            families = df['family'].apply(lambda f: f if f == family else 'other')
+            count = len(families[families==family])
+            labels = pd.concat([families[families==family],families[families=='other'].sample(n=count)])
             self.silhouettes.loc[family] = self.compute_silhouettes(labels)
             return self.best_silhouette(family)[0]
         topfams = [fam[0] for fam in self.consistent_families[:n_clusts]]
@@ -1150,6 +1152,7 @@ class ColGroup:
             
     @require_pc
     def plot_families(self,fams=None,multi=False):
+        labels = None
         if not multi:
             self.current_axis = None
         dat = self.get_table()
@@ -1158,11 +1161,15 @@ class ColGroup:
         elif isinstance(fams,int):
             fams = [f for f,c in self.consistent_families[:fams]]
         elif isinstance(fams,str) and fams in dat['family'].values:
-            dat['family'] = dat['family'].apply(lambda f: f if f == fams else 'other')
-            fams = [fams,'other']
-        labels = dat.loc[dat['family'].isin(fams)]['family']
-        suptit = "{} ({})".format(" ".join(fams),self.mode.upper())
-        points = self.projections(dat['family'].isin(fams))
+            targetseries = dat[dat['family'] == fams]['family']
+            others = dat[dat['family'] != fams]['family'].sample(n=len(targetseries)).apply(lambda f: 'other')
+            labels = pd.concat([targetseries,others])
+            points = self.projections(labels.index)
+            suptit = "{1:d} {0:s} vs. {1:d} Random Others ({2:s})".format(fams,len(targetseries),self.mode.upper())
+        if labels is None:
+            labels = dat.loc[dat['family'].isin(fams)]['family']
+            points = self.projections(dat['family'].isin(fams))
+            suptit = "{} ({})".format(" ".join(fams),self.mode.upper())
         self.pcplot(points,labels)
         sil = silsc(points.values[:,:2],labels)
         if not multi:
