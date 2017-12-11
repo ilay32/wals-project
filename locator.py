@@ -132,9 +132,37 @@ for feat,val in zapvals:
     wals.loc[wals['Name'] == 'Zapotec (Zoogocho)',feat] = val
 
 
-
 # helpers #
 #---------#
+def like(str1,str2,strict=True):
+    for sub1 in str1.split(" "):
+        for sub2 in str2.split(" "):
+            if strict:
+                cond = sub1.lower() == sub2.lower()
+            else:
+                cond = (sub1 in sub2) or (sub2 in sub1)
+            if cond:
+                return True
+    return False
+
+
+
+def polinski_headness(walsrow):
+    for typ,langs in polinsk['heads'].items():
+        for l in langs:
+            for c in ['family','genus','Name']:
+                if like(walsrow[c],l):
+                    return typ
+    return 'unknown'
+
+def polinski_ratios(lang):
+    for typ,langs in polinsk['ratios'].items():
+        for l in langs:
+            if like(lang,l):
+                return typ
+    return 'unknown'
+
+
 def unique_pairs(l,withsyms=False):
     return [(l[i],l[j]) for i in range(len(l) - 1) for j in range(i+int(not withsyms),len(l))]
 
@@ -149,17 +177,6 @@ def phonsub(f):
     for sub,feats in phonsubs.items():
         if f in feats:
             return sub
-
-def like(str1,str2,strict=True):
-    for sub1 in str1.split(" "):
-        for sub2 in str2.split(" "):
-            if strict:
-                cond = sub1.lower() == sub2.lower()
-            else:
-                cond = (sub1 in sub2) or (sub2 in sub1)
-            if cond:
-                return True
-    return False
 
 def rebinarize():
     b = wals.ix[:,10:].replace(to_replace=".+",regex=True,value=1)
@@ -222,15 +239,26 @@ def chunk_wals(columns,just_actives=True,allow_empty=0):
     cols = columns if just_actives else np.concatenate((wals.columns[0:10],columns))
     return wals.loc[indices][cols]
 
-# helper dependant globals #
-#-------------------------#
-#headclass_indices = islang(sum([l for c,l in polinsk['heads'].items()],[]))
-#ratioclass_indices = islang(sum([l for c,l in polinsk['ratios'].items()],[]))
+# helper dependent globals#
+headnesses = pd.Series('headnesses',index=wals.index)
+vnratios = pd.Series('vnratios',index=wals.index)
+hlangs = list()
+rlangs = list()
+for i,r in wals.iterrows():
+    hed = polinski_headness(r)
+    rat = polinski_ratios(r['Name'])
+    headnesses.loc[i] = hed
+    vnratios.loc[i] =  rat  
+    if hed != 'unknown':
+        hlangs.append(r['Name'])
+    if rat != 'unknown':
+        rlangs.append(r['Name'])
+
 
 class Locator:
     def __init__(self,minrows,cutoff=2,sil_cutoff=0.5,limit=None,heterogenous=None, \
         include=None,exclude=None,with_clustering=False,allow_empty=0, \
-        target_langs=None,target_genuses=None,loi=None,fmode='true'):
+        target_langs=None,target_genuses=None,loi=None,loi_count=1,fmode='true'):
         self.minrows = minrows
         self.cutoff = float(cutoff or 2)
         self.sil_cutoff = sil_cutoff
@@ -256,6 +284,7 @@ class Locator:
         if loi is not None:
             lois = loi if isinstance(loi,list) else [loi]
             self.loi = wals.loc[wals['Name'].isin(lois)].index
+            self.loi_count = loi_count
         else:
             self.loi = None
         self.totalfeatures = 0
@@ -280,7 +309,7 @@ class Locator:
         subtract = self.allow_empty if l > self.allow_empty else 0
         fullrows = sums[sums >= (l - subtract)]
         if self.loi is not None:
-            if len(fullrows.index.intersection(self.loi)) == 0:
+            if len(fullrows.index.intersection(self.loi)) < self.loi_count:
                 return False
         if self.target_langs is not None:
             fullrows = fullrows[fullrows.index.intersection(self.target_langs)]
@@ -318,7 +347,7 @@ class Locator:
 
     def locate_columns(self,numcols):
         minrows = self.minrows
-        print("entering",minrows,numcols)
+        #print("entering",minrows,numcols)
         ret = list()
         if numcols == 1:
             cols = binarized.columns[binarized.sum(axis=0) >= minrows]
@@ -419,6 +448,8 @@ class Locator:
                 groupkey = "".join(sorted(cols))
                 if groupkey not in asessed:
                     group = ColGroup(cols,allow_empty=self.allow_empty,fmode=self.fmode)
+                    if self.heterogenous is not None and group.fields_spread() > self.heterogenous:
+                        continue
                     group.determine_spectral_data()
                     qind = group.quality_index
                     k = str(i+1)+'-long'
@@ -503,6 +534,7 @@ class ColGroup:
         self.bogus_seed = int("".join([c for c in "".join(self.cols) if c.isdigit()])) % (2**32 - 1)
         self.raw_silhouettes = None
         self.paired_silhouettes = None
+        self.polinsk_pairwise = {'headness':None,'ratio':None}
 
     def set_spectral_core(self,force_new=False):
         if self.mode == 'mca':
@@ -644,7 +676,60 @@ class ColGroup:
         sil = silsc(points.values[:,:2],labels)
         plt.suptitle("{}\n{}  silhouette: {:.2f}".format(suptit,self.comps_line(),sil))
         plt.show()
+    
+    def polinsk_series(self,prop='headness'):
+        if prop not in ['headness','ratio']:
+            return
+        s = headnesses if prop == 'headness' else vnratios
+        select = s[s!='unknown']
+        return s[self.get_table().index.intersection(select.index)]
+    
+    @require_pc
+    def polinsk_separation(self,prop='headness',min_clust=5,pairwise=False,classes=None):
+        s = self.polinsk_series(prop)
+        freqs = nltk.FreqDist(s)
+        if classes is None:
+            classes = [p[0] for p in freqs.most_common() if p[1] >= min_clust]
+            n_clusts = len(classes)
+            if pairwise:
+                if self.polinsk_pairwise[prop] is None:
+                    sep = pd.DataFrame(index=np.arange(int(n_clusts*(n_clusts - 1)/2)),columns=['class1','class2','bestsil','dims'])
+                    for i,c1 in enumerate(classes[:-1]):
+                        for j,c2 in enumerate(classes[i+1:],1):
+                            s = self.polinsk_series(prop)
+                            sils = self.compute_silhouettes(s[s.isin([c1,c2])])
+                            best = max(sils)
+                            dims = max(0,sils.index(best) - 1)
+                            sep.loc[i*(n_clusts-1)+j-1] = [c1,c2,best,dims]
+                    self.polinsk_pairwise[prop] = sep
+                return self.polinsk_pairwise[prop]['bestsil'].mean()
+        if prop + '-' +  str(n_clusts) not in self.silhouettes.index:
+            if n_clusts < 2:
+                print("not enough languages with known",prop)
+                return None
+            self.silhouettes.loc[prop+'-'+str(n_clusts)] = self.compute_silhouettes(s[s.isin(classes)])
+        return self.best_silhouette(prop,n_clusts)[0]
 
+    def plot_polinsk_prop(self,prop='headness',classes=None,min_clust=5):
+        self.current_axis = None
+        df = self.get_table()
+        s = self.polinsk_series(prop)
+        if classes is None: 
+            freqs = nltk.FreqDist(s)
+            classes = [p[0] for p in freqs.most_common() if p[1] >= min_clust]
+        suptit = "Separation by {:s} Class ({:s})".format(prop,self.mode.upper())
+        labels = s[s.isin(classes)]
+        points = self.projections(labels.index)
+        self.pcplot(points,labels)
+        sil = silsc(points.values[:,:2],labels)
+        plt.suptitle("{:s}\n{:s}  silhouette: {:.2f}".format(suptit,self.comps_line(),sil))
+        plt.show()
+    
+    def bogus_separation(self,n_clusts=2):
+        self.silhouettes.loc['bogus-'+str(n_clusts)] = self.compute_silhouettes(self.bogus_labels(n_clusts))
+        return self.best_silhouette('bogus',n_clusts)[0]
+
+    
     def best_silhouette(self,kind,n_clusts=None):
         k = kind
         if  n_clusts is not None:
@@ -661,12 +746,17 @@ class ColGroup:
         sils = self.silhouettes.loc[k][2:]
         return sils.max(),sils.argmax() - 1
 
-    def gen_separation(self,n_clusts=2):
+    def gen_separation(self,n_clusts=2,family=None):
         df = self.get_table()
+        if family in df['family'].values:
+            labels = df['family'].apply(lambda f: f if f == family else 'other')
+            self.silhouettes.loc[family] = self.compute_silhouettes(labels)
+            return self.best_silhouette(family)[0]
         topfams = [fam[0] for fam in self.consistent_families[:n_clusts]]
         labels = df['family'][df['family'].isin(topfams)]
-        self.silhouettes.loc['genetic-'+str(n_clusts)] = self.compute_silhouettes(labels)
+        self.silhouettes.loc['genetic-'+str(n_clusts) ] = self.compute_silhouettes(labels)
         return self.best_silhouette('genetic',n_clusts)[0]
+
 
     def plot_silhouettes(self,kind='genetic',clusts=2,withsingles=False):
         thresh = 0.5
@@ -697,48 +787,48 @@ class ColGroup:
         plt.legend()
         plt.show()
 
-    def loose_ratio_column(self,columns=['Name','genus','family']):
-        df = self.get_table()
-        if 'verb-noun-ratio' in df.columns:
-            df = df.drop('verb-noun-ratio',1)
-        ratios = list()
-        count = 0
-        for i,r in df.iterrows():
-            known = False
-            for c,l in polinsk['ratios'].items():
-                for lang in l:
-                    for column in columns:
-                        if like(r[column],lang):
-                            ratios.append(c)
-                            known = True
-                            count += 1
-                            break
-            if not known:
-                ratios.append('unknown')
-        df.insert(0,'verb-noun-ratio',pd.Series(ratios,index=df.index))
-        self.known_vnratios = count
-        return df
+    #def loose_ratio_column(self,columns=['Name','genus','family']):
+    #    df = self.get_table()
+    #    if 'verb-noun-ratio' in df.columns:
+    #        df = df.drop('verb-noun-ratio',1)
+    #    ratios = list()
+    #    count = 0
+    #    for i,r in df.iterrows():
+    #        known = False
+    #        for c,l in polinsk['ratios'].items():
+    #            for lang in l:
+    #                for column in columns:
+    #                    if like(r[column],lang):
+    #                        ratios.append(c)
+    #                        known = True
+    #                        count += 1
+    #                        break
+    #        if not known:
+    #            ratios.append('unknown')
+    #    df.insert(0,'verb-noun-ratio',pd.Series(ratios,index=df.index))
+    #    self.known_vnratios = count
+    #    return df
 
-    def add_ratio_column(self):
-        df = self.get_table()
-        if 'verb-noun-ratio' in df.columns:
-            df = df.drop('verb-noun-ratio',1)
-        ratios = list()
-        count = 0
-        for i,r in df.iterrows():
-            known = False
-            for c,l in polinsk['ratios'].items():
-                for lang in l:
-                    if r['Name'] == lang:
-                        ratios.append(c)
-                        known = True
-                        count += 1
-                        break
-            if not known:
-                ratios.append('unknown')
-        df.insert(0,'verb-noun-ratio',pd.Series(ratios,index=df.index))
-        self.known_vnratios = count
-        return df
+    #def add_ratio_column(self):
+    #    df = self.get_table()
+    #    if 'verb-noun-ratio' in df.columns:
+    #        df = df.drop('verb-noun-ratio',1)
+    #    ratios = list()
+    #    count = 0
+    #    for i,r in df.iterrows():
+    #        known = False
+    #        for c,l in polinsk['ratios'].items():
+    #            for lang in l:
+    #                if r['Name'] == lang:
+    #                    ratios.append(c)
+    #                    known = True
+    #                    count += 1
+    #                    break
+    #        if not known:
+    #            ratios.append('unknown')
+    #    df.insert(0,'verb-noun-ratio',pd.Series(ratios,index=df.index))
+    #    self.known_vnratios = count
+    #    return df
 
     @require_pc
     def compute_silhouettes(self,labels):
@@ -808,16 +898,6 @@ class ColGroup:
             labels.loc[ind] = "bogus-{:d}".format(int(i+1))
             used = used.union(ind)
         return labels
-
-    def bogus_separation(self,n_clusts=2):
-        self.silhouettes.loc['bogus-'+str(n_clusts)] = self.compute_silhouettes(self.bogus_labels(n_clusts))
-        return self.best_silhouette('bogus',n_clusts)[0]
-
-    def ratio_separation(self):
-        df = self.add_ratio_column()
-        labels = df.loc[df['verb-noun-ratio'] != 'unknown']['verb-noun-ratio']
-        self.silhouettes.loc['ratio'] = self.compute_silhouettes(labels)
-        return self.best_silhouette('ratio')[0]
 
     def add_genetic_data(self,n_clusts=2,raw=False):
         self.gen_separation(n_clusts)
@@ -1077,6 +1157,9 @@ class ColGroup:
             fams = [f for f,c in self.consistent_families[:2]]
         elif isinstance(fams,int):
             fams = [f for f,c in self.consistent_families[:fams]]
+        elif isinstance(fams,str) and fams in dat['family'].values:
+            dat['family'] = dat['family'].apply(lambda f: f if f == fams else 'other')
+            fams = [fams,'other']
         labels = dat.loc[dat['family'].isin(fams)]['family']
         suptit = "{} ({})".format(" ".join(fams),self.mode.upper())
         points = self.projections(dat['family'].isin(fams))
@@ -1087,8 +1170,6 @@ class ColGroup:
             plt.show()
         else:
             return sil
-    
-
 
     @require_pc
     def loadings(self):
