@@ -506,7 +506,9 @@ class ColGroup:
         'gray',
         'pink'
     ]
-    def __init__(self,cols,allow_empty=0,fmode='true',fams_min=None):
+    alph = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    numer_trnstable = str.maketrans(dict([(c,str(i)) for i,c in enumerate(alph,1)]))
+    def __init__(self,cols,allow_empty=0,fmode='true',fams_min=None,silhouette_dims=None):
         self._mode = 'pca'
         self._fmode = fmode
         self.original_fmode = fmode
@@ -535,6 +537,10 @@ class ColGroup:
         self.raw_silhouettes = None
         self.paired_silhouettes = None
         self.polinsk_pairwise = {'headness':None,'ratio':None}
+        self.silhouette_dims = silhouette_dims
+    
+    def numeric_key(self):
+        return int("".join(self.cols).translate(ColGroup.numer_trnstable))
 
     def set_spectral_core(self,force_new=False):
         if self.mode == 'mca':
@@ -577,8 +583,12 @@ class ColGroup:
     @property
     @require_pc
     def silhouettes(self):
+        if self.silhouette_dims == 'full':
+            dims = len(self.categories) + 2
+        else:
+            dims = self.significant_dimensions() + 3
         if self.mode not in self._silhouettes:
-            self._silhouettes[self.mode] = pd.DataFrame(columns=np.arange(len(self.categories)+2))
+            self._silhouettes[self.mode] = pd.DataFrame(columns=np.arange(dims))
         return self._silhouettes[self.mode]
 
     @property
@@ -745,13 +755,21 @@ class ColGroup:
             return None
         sils = self.silhouettes.loc[k][2:]
         return sils.max(),sils.argmax() - 1
+    
+    def single_family_labels(self,family,data=None):
+        df = self.get_table() if data is None else data
+        np.random.seed(self.numeric_key())
+        tar = df[df['family'] == family]['family']
+        others = df[df['family'] != family]['family'].sample(n=len(tar)).apply(lambda f: 'other')
+        return pd.concat([tar,others])
 
     def gen_separation(self,n_clusts=2,family=None):
         df = self.get_table()
         if family in df['family'].values:
-            families = df['family'].apply(lambda f: f if f == family else 'other')
-            count = len(families[families==family])
-            labels = pd.concat([families[families==family],families[families=='other'].sample(n=count)])
+            #families = df['family'].apply(lambda f: f if f == family else 'other')
+            #count = len(families[families==family])
+            #labels = pd.concat([families[families==family],families[families=='other'].sample(n=count)])
+            labels = self.single_family_labels(family,data=df)
             self.silhouettes.loc[family] = self.compute_silhouettes(labels)
             return self.best_silhouette(family)[0]
         topfams = [fam[0] for fam in self.consistent_families[:n_clusts]]
@@ -847,7 +865,9 @@ class ColGroup:
 
         silhouettes.append(silsc(filtered,labels))
         silhouettes.append(silsc(filtered,labels,hamming))
-        for numdims in range(1,len(self.categories)+1):
+        #for numdims in range(1,len(self.categories)+1):
+        dims = len(self.categories) if self.silhouette_dims == 'full' else self.significant_dimensions() + 1
+        for numdims in range(1,dims+1):
             filtered = self.projections(labels.index)[np.arange(numdims)]
             silhouettes.append(silsc(filtered,labels))
         return silhouettes
@@ -1161,11 +1181,9 @@ class ColGroup:
         elif isinstance(fams,int):
             fams = [f for f,c in self.consistent_families[:fams]]
         elif isinstance(fams,str) and fams in dat['family'].values:
-            targetseries = dat[dat['family'] == fams]['family']
-            others = dat[dat['family'] != fams]['family'].sample(n=len(targetseries)).apply(lambda f: 'other')
-            labels = pd.concat([targetseries,others])
+            labels = self.single_family_labels(fams,data=dat)
             points = self.projections(labels.index)
-            suptit = "{1:d} {0:s} vs. {1:d} Random Others ({2:s})".format(fams,len(targetseries),self.mode.upper())
+            suptit = "{1:d} {0:s} vs. {1:d} Random Others ({2:s})".format(fams,self.families[fams],self.mode.upper())
         if labels is None:
             labels = dat.loc[dat['family'].isin(fams)]['family']
             points = self.projections(dat['family'].isin(fams))
