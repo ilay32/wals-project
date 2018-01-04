@@ -15,6 +15,32 @@ from spectral import kmeans
 parser = optparse.OptionParser()
 
 parser.add_option(
+    "-n",
+    "--no-asess",
+    dest="no_asess",
+    metavar="NO_ASESS",
+    help="return all groups by coverage only, skipping pca asessment alltogether",
+    action="store_true"
+)
+
+parser.add_option(
+    "-m",
+    "--min-freq-fam",
+    dest="minfreq_fam",
+    metavar="MINFREQF",
+    help="set the minimal family count for the most frequent family"
+)
+
+parser.add_option(
+    "-p",
+    "--topfamilies-proportions",
+    dest="topfams_prop",
+    metavar="(TOP,PROP)",
+    help="given the pair (n,max_p), the counts of n most frequent families will be not more than max_p smaller than the top one"
+)
+
+
+parser.add_option(
     "-f",
     "--feature-mode",
     dest="fmode",
@@ -32,7 +58,7 @@ parser.add_option(
 
 parser.add_option(
     "-a",
-    "--allow_empty",
+    "--allow-empty",
     dest="allow_empty",
     metavar="EMPTY",
     type="int",
@@ -67,6 +93,7 @@ parser.add_option(
 )
 
 parser.add_option(
+    "-d",
     "--heterogenous",
     type="float",
     nargs=1,
@@ -258,8 +285,12 @@ for i,r in wals.iterrows():
 class Locator:
     def __init__(self,minrows,cutoff=2,sil_cutoff=0.5,limit=None,heterogenous=None, \
         include=None,exclude=None,with_clustering=False,allow_empty=0, \
-        target_langs=None,target_genuses=None,loi=None,loi_count=1,fmode='true'):
-        self.minrows = minrows
+        target_langs=None,target_genuses=None,loi=None,loi_count=1,fmode='true', \
+        topfams_prop=None, minfreq_fam=None,no_asess=False):
+        self.minrows = max(minrows,(minfreq_fam or 0))
+        if (topfams_prop is not) None and (minfreq_fam is not None):
+            n,p = topfams_prop
+            self.minrows = min(int(minfreq_fam + (n-1)*(1-p)*minfreq_fam),minrows)
         self.cutoff = float(cutoff or 2)
         self.sil_cutoff = sil_cutoff
         if with_clustering and with_clustering not in ['genetic','ratio']:
@@ -281,6 +312,9 @@ class Locator:
         self.limit = limit
         self.target_langs = target_langs
         self.target_genuses = self.verify_genuses(target_genuses)
+        self.topfams_prop = topfams_prop
+        self.minfreq_fam=minfreq_fam
+        self.no_asess = no_asess
         if loi is not None:
             lois = loi if isinstance(loi,list) else [loi]
             self.loi = wals.loc[wals['Name'].isin(lois)].index
@@ -308,6 +342,18 @@ class Locator:
         sums = np.sum(binarized[cols],axis=1)
         subtract = self.allow_empty if l > self.allow_empty else 0
         fullrows = sums[sums >= (l - subtract)]
+        if (self.minfreq_fam is not None) and len(fullrows) >= minrows:
+            famfreqs = nltk.FreqDist(wals.iloc[fullrows.index]['family']).most_common()
+            if famfreqs[0][1] < self.minfreq_fam:
+                return False
+            if self.topfams_prop is not None:
+                n,p = self.topfams_prop
+                if len(famfreqs) < n:
+                    return False
+                thresh = self.minfreq_fam*(1 - p)
+                for f,c in famfreqs[1:n]:
+                    if c < thresh:
+                        return False
         if self.loi is not None:
             if len(fullrows.index.intersection(self.loi)) < self.loi_count:
                 return False
@@ -440,6 +486,9 @@ class Locator:
                 savefile += "-exc-{}".format("-".join(exc))
         self.totalfeatures = len(binarized.columns)
         allcols = self.locate_all_columns()
+        if self.no_asess:
+            self.flagged = [ColGroup(g) for g in sum(allcols,[])] 
+            return
         for i in range(2,len(allcols)):
             print("asessing {:d} long groups".format(i+1))
             icols = allcols[i]
@@ -540,7 +589,7 @@ class ColGroup:
         self.silhouette_dims = silhouette_dims
     
     def numeric_key(self):
-        return int("".join(self.cols).translate(ColGroup.numer_trnstable))
+        return int("".join(self.cols).translate(ColGroup.numer_trnstable)) % 2**32
 
     def set_spectral_core(self,force_new=False):
         if self.mode == 'mca':
@@ -662,6 +711,13 @@ class ColGroup:
 
     def fields_spread(self):
         return self.fields.most_common(1)[0][1]/float(self.fields.N())
+
+    def families_spread(self,n_fams,max_diff):
+        thresh = self.consistent_families[0][1]*(1 - max_diff)
+        for f,c in self.consistent_families[1:n_fams]:
+            if c < thresh:
+                return False
+        return True
 
     def get_table(self):
         table =  chunk_wals(self.cols,False,self.allow_empty)
@@ -1020,7 +1076,7 @@ class ColGroup:
         if i < len(fax):
             for a in fax[i+1:]:
                 a.set_visible(False)
-        plt.show()
+        #plt.show()
 
     def pcplot(self,points,labels=None,annotate=True):
         multi = False
@@ -1192,7 +1248,7 @@ class ColGroup:
         sil = silsc(points.values[:,:2],labels)
         if not multi:
             plt.suptitle("{}\n{}  silhouette: {:.2f}".format(suptit,self.comps_line(),sil))
-            plt.show()
+            #plt.show()
         else:
             return sil
 
