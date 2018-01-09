@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 from sklearn.cluster import KMeans as km
 from sklearn.metrics import silhouette_score as silsc
+from sklearn.preprocessing import LabelEncoder as LE
+from sklearn.preprocessing import OneHotEncoder as OE
+from sklearn.ensemble import RandomForestClassifier as RFC
 from scipy.spatial.distance import hamming,euclidean
 from scipy.linalg import norm
 from scipy.stats import entropy
@@ -15,11 +18,11 @@ from spectral import kmeans
 parser = optparse.OptionParser()
 
 parser.add_option(
-    "-n",
-    "--no-asess",
-    dest="no_asess",
-    metavar="NO_ASESS",
-    help="return all groups by coverage only, skipping pca asessment alltogether",
+    "-t",
+    "--asessment_type",
+    dest="asess",
+    metavar="ASESS",
+    help="set asessment criterion. default: 'spectral', other options: None,'families_spread' (will use the -p option if set and None if not)",
     action="store_true"
 )
 
@@ -173,7 +176,6 @@ def like(str1,str2,strict=True):
     return False
 
 
-
 def polinski_headness(walsrow):
     for typ,langs in polinsk['heads'].items():
         for l in langs:
@@ -286,11 +288,11 @@ class Locator:
     def __init__(self,minrows,cutoff=2,sil_cutoff=0.5,limit=None,heterogenous=None, \
         include=None,exclude=None,with_clustering=False,allow_empty=0, \
         target_langs=None,target_genuses=None,loi=None,loi_count=1,fmode='true', \
-        topfams_prop=None, minfreq_fam=None,no_asess=False):
+        topfams_prop=None, minfreq_fam=None,asess='spectral'):
         self.minrows = max(minrows,(minfreq_fam or 0))
-        if (topfams_prop is not) None and (minfreq_fam is not None):
+        if (topfams_prop is not None) and (minfreq_fam is not None):
             n,p = topfams_prop
-            self.minrows = min(int(minfreq_fam + (n-1)*(1-p)*minfreq_fam),minrows)
+            self.minrows = max(int(minfreq_fam + (n-1)*(1-p)*minfreq_fam),minrows)
         self.cutoff = float(cutoff or 2)
         self.sil_cutoff = sil_cutoff
         if with_clustering and with_clustering not in ['genetic','ratio']:
@@ -314,7 +316,7 @@ class Locator:
         self.target_genuses = self.verify_genuses(target_genuses)
         self.topfams_prop = topfams_prop
         self.minfreq_fam=minfreq_fam
-        self.no_asess = no_asess
+        self.asess = 'families_spread' if (asess=='families_spread' and self.topfams_prop is not None) else None
         if loi is not None:
             lois = loi if isinstance(loi,list) else [loi]
             self.loi = wals.loc[wals['Name'].isin(lois)].index
@@ -486,33 +488,39 @@ class Locator:
                 savefile += "-exc-{}".format("-".join(exc))
         self.totalfeatures = len(binarized.columns)
         allcols = self.locate_all_columns()
-        if self.no_asess:
-            self.flagged = [ColGroup(g) for g in sum(allcols,[])] 
+        if self.asess is None:
+            flagged = [ColGroup(g) for g in sum(allcols,[])]
+            self.flagged = flagged
             return
-        for i in range(2,len(allcols)):
-            print("asessing {:d} long groups".format(i+1))
-            icols = allcols[i]
-            for j,cols in enumerate(icols):
-                progress(j,len(icols),min(len(icols),50),"flagged:{:d}".format(len(flagged)))
-                groupkey = "".join(sorted(cols))
-                if groupkey not in asessed:
-                    group = ColGroup(cols,allow_empty=self.allow_empty,fmode=self.fmode)
-                    if self.heterogenous is not None and group.fields_spread() > self.heterogenous:
-                        continue
-                    group.determine_spectral_data()
-                    qind = group.quality_index
-                    k = str(i+1)+'-long'
-                    if k in qs:
-                        qs[k].append(qind)
-                    else:
-                        qs[k] = [qind]
-                    if  qind > self.cutoff:
-                        if self.with_clustering in ['ratio','genetic']:
-                            sil = group.gen_separation() if self.with_clustering == 'genetic' else group.ratio_separation()
-                        if (self.with_clustering and sil >= self.sil_cutoff) or not self.with_clustering:
-                            flagged.append(group)
-                    asessed.add(groupkey)
-            print()
+        else:
+            for i in range(2,len(allcols)):
+                print("asessing {:d} long groups. criterion:{:s}".format(i+1,self.asess))
+                icols = allcols[i]
+                for j,cols in enumerate(icols):
+                    progress(j,len(icols),min(len(icols),50),"flagged:{:d}".format(len(flagged)))
+                    groupkey = "".join(sorted(cols))
+                    if groupkey not in asessed:
+                        group = ColGroup(cols,allow_empty=self.allow_empty,fmode=self.fmode)
+                        if self.heterogenous is not None and group.fields_spread() > self.heterogenous:
+                            continue
+                        if self.asess == 'families_spread':
+                            if g.families_spread(*self.topfams_prop):
+                                flagged.append(g)
+                        else:
+                            group.determine_spectral_data()
+                            qind = group.quality_index
+                            k = str(i+1)+'-long'
+                            if k in qs:
+                                qs[k].append(qind)
+                            else:
+                                qs[k] = [qind]
+                            if  qind > self.cutoff:
+                                if self.with_clustering in ['ratio','genetic']:
+                                    sil = group.gen_separation() if self.with_clustering == 'genetic' else group.ratio_separation()
+                                if (self.with_clustering and sil >= self.sil_cutoff) or not self.with_clustering:
+                                    flagged.append(group)
+                        asessed.add(groupkey)
+                print()
         if self.heterogenous:
             savefile += "-heterogenous-{:.1f}".format(self.heterogenous)
         if self.limit:
@@ -587,6 +595,7 @@ class ColGroup:
         self.paired_silhouettes = None
         self.polinsk_pairwise = {'headness':None,'ratio':None}
         self.silhouette_dims = silhouette_dims
+        self.families_rf = None
     
     def numeric_key(self):
         return int("".join(self.cols).translate(ColGroup.numer_trnstable)) % 2**32
@@ -1332,6 +1341,45 @@ family2: {10:d} ({11:s})
             self.silhouettes_repr()
         )
         return ret
+    
+    #random forest family classification
+    def train_rf(self,n_families=None,cv_proportion=0.85):
+        if n_families is None:
+            n_families = len([p for p in self.consistent_families if p[1] >= self.minimal_family_strength])
+        if not n_families or n_families < 2:
+            print("please specify number of families to classify, or minimal family strength not larger than",self.conistent_families[1][1])
+            return
+        #df,keys = self.prepare_rf_table(n_families)
+        X,y = self.prepare_rf_table(n_families)
+        rfc = RFC(criterion='entropy')
+        train = X.sample(int(len(X)*cv_proportion))
+        test = X.loc[X.index.difference(train.index)]
+        #rfc.fit(train[self.cols],train['family'])
+        rfc.fit(train.loc[:,train.columns!='family'],y.loc[train.index])
+        acc = rfc.score(test.loc[:,test.columns!='family'],y.loc[test.index])
+        self.families_rf = {
+            'cv': {
+                'accuracy' : acc,
+                'train' : cv_proportion,
+                'classifier': rfc
+            },
+            'fullclassifier' : RFC(criterion='entropy',min_impurity_decrease=0.05).fit(X,y)#,
+            #'label_keys' : keys
+        }
+    
+    def prepare_rf_table(self,n_families):
+        t = self.get_table()
+        reduced = t[t['family'].isin([f for f,c in self.consistent_families[:n_families]])][self.cols + ['family']]
+        #labelkeys = dict()
+        #for c in self.cols:
+        #    le = LE().fit(t[c].unique())
+        #    labelkeys[c] = le
+        #    ret[c] = le.transform(ret[c])
+        #return ret,labelkeys
+        return pd.get_dummies(reduced[self.cols]),reduced['family']
+
+
+        
 
 class SingleCol(ColGroup):
     sqrt2 = np.sqrt(2)
@@ -1410,7 +1458,9 @@ class SingleCol(ColGroup):
         return pd.DataFrame(ret,index=pd.MultiIndex.from_tuples(tuples=ind,names=['fam1','fam2']))
         
 
-#if __name__ == '__main__':
+if __name__ == '__main__':
+    g = ColGroup(['30A','31A','32A','49A','50A','51A'])
+    t,k = g.prepare_rf_table(4)
 #    opts,args = parser.parse_args()
 #    minrows  = int(args[0])
 #    loc = Locator(minrows,**opts.__dict__)
