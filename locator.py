@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import rpy2.robjects as RobJ
 from sklearn.cluster import KMeans as km
 from sklearn.metrics import silhouette_score as silsc
 from sklearn.preprocessing import LabelEncoder as LE
@@ -8,10 +9,16 @@ from sklearn.ensemble import RandomForestClassifier as RFC
 from scipy.spatial.distance import hamming,euclidean
 from scipy.linalg import norm
 from scipy.stats import entropy
-import copy,fbpca,yaml,hashlib,pickle,nltk,sys,nltk,optparse,os,prince
 from progress import progress
 from matplotlib import pyplot as plt
 from spectral import kmeans
+from rpy2.robjects import pandas2ri
+from rpy2.robjects.packages import importr
+import copy,fbpca,yaml,hashlib,pickle,nltk,sys,nltk,optparse,os,prince,rpy2
+
+
+pandas2ri.activate()
+importr('randomForest')
 
 # for cli usage #
 #---------------#
@@ -23,7 +30,6 @@ parser.add_option(
     dest="asess",
     metavar="ASESS",
     help="set asessment criterion. default: 'spectral', other options: None,'families_spread' (will use the -p option if set and None if not)",
-    action="store_true"
 )
 
 parser.add_option(
@@ -596,7 +602,9 @@ class ColGroup:
         self.polinsk_pairwise = {'headness':None,'ratio':None}
         self.silhouette_dims = silhouette_dims
         self.families_rf = None
-    
+        self.rforest = None
+        self.family_rfs_data = dict()
+
     def numeric_key(self):
         return int("".join(self.cols).translate(ColGroup.numer_trnstable)) % 2**32
 
@@ -821,13 +829,68 @@ class ColGroup:
         sils = self.silhouettes.loc[k][2:]
         return sils.max(),sils.argmax() - 1
     
-    def single_family_labels(self,family,data=None):
+    def single_family_labels(self,family,data=None,seedplus=0):
         df = self.get_table() if data is None else data
-        np.random.seed(self.numeric_key())
+        np.random.seed(self.numeric_key() + seedplus)
         tar = df[df['family'] == family]['family']
         others = df[df['family'] != family]['family'].sample(n=len(tar)).apply(lambda f: 'other')
-        return pd.concat([tar,others])
+        return pd.concat([tar,others]).sort_index()
+    
+    def rforest_command(self,forestargs):
+        ret = 'randomForest(family ~ ., data=lapply(rforestdat,as.factor),importance=TRUE'
+        if forestargs is None:
+            forestargs = {
+                'ntree' : 200,
+                'mtry' : max(len(self.cols) - 2, 2)
+            }
+        for k,v in forestargs.items():
+            ret += ','+str(k)+'='+str(v)
+        return ret+')'
 
+    def rrf_single(self,top=0,fam=None,**forestargs):
+        if fam is None:
+            fam = self.consistent_families[top][0]
+        sp= forestargs.get('seedplus') or 0
+        family = self.single_family_labels(fam,data=None,seedplus=sp)
+        df = self.get_table()[self.cols].loc[family.index]
+        df['family'] = family
+        rdf = RobJ.pandas2ri.py2ri(df)
+        RobJ.globalenv['rforestdat'] = rdf
+        forest  = RobJ.r(self.rforest_command(forestargs))
+        self.rforest = forest
+        RobJ.globalenv['rforestdat'] = RobJ.NULL
+
+    def family_rfs(self,family,numforests=5):
+        dat =  pd.DataFrame(index=['sample '+str(i) for i in range(numforests)],columns=['oob','precision','recall','f-measure','rerror'])
+        for i in range(numforests):
+            self.rrf_single(fam=family,seedplus=i)
+            oob = self.get_rforest_data('err.rate').iloc[-1][0]
+            conf = self.get_rforest_data('confusion')
+            pred = conf.loc[family][family]
+            prec = pred/conf[family].sum()
+            rec = pred/conf[[family,'other']].loc[family].sum()
+            rerr  = conf.loc[family]['class.error']
+            fmeas  =  (2 * prec * rec)/(prec + rec)
+            dat.iloc[i] = [oob,prec,rec,fmeas,rerr]
+        self.family_rfs_data[family] = dat.astype(float)
+    
+    def get_rforest_data(self,item,forestargs=None):
+        if self.rforest is None:
+            self.rrf_single(**forestargs)
+        RobJ.globalenv['forest'] = self.rforest
+        item = 'forest$'+item
+        it = RobJ.r(item)
+        rows = RobJ.r('rownames('+item+')')
+        cols = RobJ.r('colnames('+item+')')
+        ret = pd.DataFrame(it)
+        if rows is not rpy2.rinterface.NULL:
+            ret.index = rows
+        if cols is not rpy2.rinterface.NULL:
+            ret.columns = cols
+        RobJ.globalenv['forest'] = RobJ.NULL
+        return ret
+        
+        
     def gen_separation(self,n_clusts=2,family=None):
         df = self.get_table()
         if family in df['family'].values:
@@ -1340,6 +1403,15 @@ family2: {10:d} ({11:s})
             top2[1][0],
             self.silhouettes_repr()
         )
+        if self.family_rfs_data:
+            d = self.family_rfs_data
+            for fam,dat in d.items():
+                ret += "{0:s} vs others: oob: {1:.3f} f-measure: {2:.3f} ({3:d} samples)\n".format(
+                    fam,
+                    dat['oob'].mean(),
+                    dat['f-measure'].mean(),
+                    len(dat)
+                )
         return ret
     
     #random forest family classification
